@@ -1,0 +1,53 @@
+{
+  "camera": {
+    "index": 0,
+    "width": 1280,
+    "height": 720,
+    "fps": 30
+  },
+  "roi": {
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+  },
+  "perspective": null,
+  "undistort": {
+    "enabled": false,
+    "camera_matrix": null,
+    "dist_coeffs": null
+  },
+  "display": {
+    "width": 1920,
+    "height": 1080,
+    "fullscreen": true,
+    "index": null,
+    "prefer_external": true
+  },
+  "calibration": {
+    "path": "calib/empty_table.png",
+    "gray": 90
+  },
+  "vision": {
+    "method": "diff+skin",
+    "diff_threshold": 28,
+    "min_area": 2200,
+    "max_area_fraction": 0.2,
+    "max_blobs": 6,
+    "track_dark_blobs": false,
+    "dark_delta": 40,
+    "morph_kernel": 5,
+    "scale": 0.5,
+    "smoothing": 0.55,
+    "match_distance": 300
+  },
+  "particles": {
+    "style": "sparks",
+    "max_count": 450,
+    "spawn_per_point": 3,
+    "fade_per_second": 0.7,
+    "attract": 900,
+    "splash": 16
+  },
+  "mode": "play"
+}
