@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 
 from liveplay.config import VisionConfig
+from liveplay.display import POSE_OUTLINE, POSE_PALM, POSE_TIP
 from liveplay.points import InteractionPoint, PointTracker
 from liveplay.vision import BlobVision
 
@@ -45,6 +46,8 @@ class VisionTest(unittest.TestCase):
         self.assertLess(abs(points[0].x - 160), 20)
         self.assertLess(abs(points[0].y - 90), 20)
         self.assertIsNone(backend.last_warning)
+        self.assertEqual(len(backend.last_poses), 1)
+        self.assertGreaterEqual(len(backend.last_poses[0].contour), 3)
 
     def test_diff_alone_also_sees_the_bright_spark(self) -> None:
         background, frame = _scene()
@@ -91,6 +94,48 @@ class VisionTest(unittest.TestCase):
         self.assertEqual(len(points), 1, backend.last_warning)
         self.assertLess(abs(points[0].x - 160), 25)
         self.assertLess(abs(points[0].y - 90), 25)
+
+    def test_pose_colors_fail_the_skin_gate(self) -> None:
+        frame = np.full((80, 180, 3), 90, dtype=np.uint8)
+        for index, rgb in enumerate((POSE_OUTLINE, POSE_PALM, POSE_TIP)):
+            bgr = (rgb[2], rgb[1], rgb[0])
+            x = 10 + index * 55
+            cv2.rectangle(frame, (x, 15), (x + 40, 65), bgr, thickness=-1)
+        backend = BlobVision(_vision(method="skin", min_area=80), None)
+        self.assertEqual(backend.detect(frame), [])
+
+    def test_spread_hand_keeps_an_outline(self) -> None:
+        background = np.full((240, 240, 3), 90, dtype=np.uint8)
+        frame = background.copy()
+        # One silhouette: a palm with three fingers and valleys between them.
+        palm = np.array(
+            [
+                [70, 200],
+                [70, 140],
+                [90, 140],
+                [90, 70],
+                [112, 70],
+                [112, 130],
+                [124, 130],
+                [124, 55],
+                [146, 55],
+                [146, 130],
+                [158, 130],
+                [158, 80],
+                [180, 80],
+                [180, 140],
+                [200, 140],
+                [200, 200],
+            ],
+            dtype=np.int32,
+        )
+        cv2.fillPoly(frame, [palm], (100, 140, 200))
+        backend = BlobVision(_vision(min_area=200), background)
+        points = backend.detect(frame)
+        self.assertEqual(len(points), 1, backend.last_warning)
+        pose = backend.last_poses[0]
+        self.assertGreaterEqual(len(pose.contour), 3)
+        self.assertGreaterEqual(len(pose.fingertips), 1)
 
 
 class TrackerTest(unittest.TestCase):

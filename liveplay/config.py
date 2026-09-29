@@ -14,7 +14,7 @@ from pathlib import Path
 
 from liveplay.errors import ConfigError
 
-MODES = ("passthrough", "overlay", "play", "calibrate")
+MODES = ("passthrough", "overlay", "play", "calibrate", "geometry", "pose")
 VISION_METHODS = ("diff", "skin", "diff+skin")
 PARTICLE_STYLES = ("sparks", "blobs", "trails")
 
@@ -52,6 +52,12 @@ DEFAULTS: dict = {
         "attract": 900,
         "splash": 16,
     },
+    "geometry": {
+        "path": "calib/display_geometry.json",
+        "bits": 7,
+        "settle": 0.32,
+        "inset": 12,
+    },
     "mode": "play",
 }
 
@@ -87,6 +93,14 @@ class CalibrationConfig:
 
 
 @dataclass
+class GeometryConfig:
+    path: Path
+    bits: int
+    settle: float
+    inset: int
+
+
+@dataclass
 class VisionConfig:
     method: str
     diff_threshold: int
@@ -119,6 +133,7 @@ class AppConfig:
     undistort: UndistortConfig
     display: DisplayConfig
     calibration: CalibrationConfig
+    geometry: GeometryConfig
     vision: VisionConfig
     particles: ParticleConfig
     mode: str
@@ -258,12 +273,12 @@ def _from_raw(raw: dict, base_dir: Path, config_path: Path) -> AppConfig:
     und = raw["undistort"]
     disp = raw["display"]
     cal = raw["calibration"]
+    geo = raw["geometry"]
     vis = raw["vision"]
     parts = raw["particles"]
     roi = raw["roi"]
-    cal_path = Path(cal["path"])
-    if not cal_path.is_absolute():
-        cal_path = base_dir / cal_path
+    cal_path = _resolve_path(base_dir, cal["path"])
+    geo_path = _resolve_path(base_dir, geo["path"])
     return AppConfig(
         camera=CameraConfig(
             index=int(cam["index"]),
@@ -286,6 +301,12 @@ def _from_raw(raw: dict, base_dir: Path, config_path: Path) -> AppConfig:
             prefer_external=bool(disp["prefer_external"]),
         ),
         calibration=CalibrationConfig(path=cal_path, gray=int(cal["gray"])),
+        geometry=GeometryConfig(
+            path=geo_path,
+            bits=int(geo["bits"]),
+            settle=float(geo["settle"]),
+            inset=int(geo["inset"]),
+        ),
         vision=VisionConfig(
             method=str(vis["method"]),
             diff_threshold=int(vis["diff_threshold"]),
@@ -353,6 +374,12 @@ def _validate(cfg: AppConfig) -> None:
         raise ConfigError("particle counts are invalid.")
     if cfg.particles.fade_per_second < 0 or cfg.particles.attract < 0:
         raise ConfigError("particle fade and attract must be 0 or more.")
+    if not 4 <= cfg.geometry.bits <= 9:
+        raise ConfigError("geometry.bits must be from 4 to 9.")
+    if cfg.geometry.settle <= 0:
+        raise ConfigError("geometry.settle must be greater than 0.")
+    if cfg.geometry.inset < 0:
+        raise ConfigError("geometry.inset must be 0 or more.")
 
 
 def _validate_perspective(points: object) -> None:
@@ -366,6 +393,13 @@ def _validate_perspective(points: object) -> None:
             float(point[1])
         except (TypeError, ValueError) as exc:
             raise ConfigError("perspective coordinates must be numbers.") from exc
+
+
+def _resolve_path(base_dir: Path, value: object) -> Path:
+    path = Path(str(value))
+    if path.is_absolute():
+        return path
+    return base_dir / path
 
 
 def _parse_roi(text: str) -> tuple[int, int, int, int]:

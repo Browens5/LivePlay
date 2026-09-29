@@ -8,3 +8,4 @@ venv/
 *.egg-info/
 calib/*.png
 calib/*.jpg
+calib/*.json

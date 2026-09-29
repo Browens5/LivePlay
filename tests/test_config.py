@@ -71,6 +71,8 @@ class ConfigTest(unittest.TestCase):
             path.write_text((ROOT / "config.json").read_text())
             cfg = load_config(parse_args(["--config", str(path)]))
             self.assertEqual(cfg.calibration.path, root / "calib" / "empty_table.png")
+            self.assertEqual(cfg.geometry.path, root / "calib" / "display_geometry.json")
+            self.assertEqual(cfg.geometry.bits, 7)
 
 
 class DisplayChoiceTest(unittest.TestCase):

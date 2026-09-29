@@ -31,8 +31,15 @@ except Exception:
 
 
 class FrameSource:
+    def read_raw(self) -> np.ndarray | None:
+        """Camera image before it is stretched onto the TV."""
+        return self.read()
+
     def read(self) -> np.ndarray | None:
         raise NotImplementedError
+
+    def map_to_screen(self, raw: np.ndarray) -> np.ndarray:
+        return raw
 
     def close(self) -> None:
         return None
@@ -144,15 +151,19 @@ class CameraCapture(FrameSource):
             f"[liveplay] camera {index} delivering {self.raw_size[0]}x{self.raw_size[1]}"
         )
 
-    def read(self) -> np.ndarray | None:
+    def read_raw(self) -> np.ndarray | None:
         ok, frame = self.cap.read()
         if not ok or frame is None or frame.size == 0:
             return None
         self.raw_size = (int(frame.shape[1]), int(frame.shape[0]))
-        maps = self._maps_for(self.raw_size)
+        self._last_raw = frame
+        return frame
+
+    def map_to_screen(self, raw: np.ndarray) -> np.ndarray:
+        maps = self._maps_for((int(raw.shape[1]), int(raw.shape[0])))
         try:
             return map_frame(
-                frame,
+                raw,
                 self.output_size,
                 roi=self.roi,
                 perspective=self.perspective,
@@ -160,6 +171,12 @@ class CameraCapture(FrameSource):
             )
         except cv2.error as exc:
             raise CaptureError(f"Camera mapping failed: {exc}") from exc
+
+    def read(self) -> np.ndarray | None:
+        raw = self.read_raw()
+        if raw is None:
+            return None
+        return self.map_to_screen(raw)
 
     def close(self) -> None:
         cap = getattr(self, "cap", None)
@@ -193,6 +210,9 @@ class FakeCamera(FrameSource):
         self.gray = int(gray)
         self._t = 0.0
         print("[liveplay] using a fake camera (no webcam).")
+
+    def read_raw(self) -> np.ndarray | None:
+        return self.read()
 
     def read(self) -> np.ndarray | None:
         frame = np.full((self.height, self.width, 3), self.gray, dtype=np.uint8)
