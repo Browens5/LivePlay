@@ -15,7 +15,7 @@ from pathlib import Path
 from liveplay.errors import ConfigError
 
 MODES = ("passthrough", "overlay", "play", "calibrate", "geometry", "pose")
-VISION_METHODS = ("diff", "skin", "diff+skin")
+VISION_METHODS = ("mediapipe", "diff", "skin", "diff+skin")
 PARTICLE_STYLES = ("sparks", "blobs", "trails")
 
 DEFAULTS: dict = {
@@ -32,7 +32,7 @@ DEFAULTS: dict = {
     },
     "calibration": {"path": "calib/empty_table.png", "gray": 90},
     "vision": {
-        "method": "diff+skin",
+        "method": "mediapipe",
         "diff_threshold": 28,
         "min_area": 2200,
         "max_area_fraction": 0.2,
@@ -43,6 +43,9 @@ DEFAULTS: dict = {
         "scale": 0.5,
         "smoothing": 0.55,
         "match_distance": 300,
+        "hands": 2,
+        "min_confidence": 0.5,
+        "model": "models/hand_landmarker.task",
     },
     "particles": {
         "style": "sparks",
@@ -113,6 +116,9 @@ class VisionConfig:
     scale: float
     smoothing: float
     match_distance: float
+    hands: int = 2
+    min_confidence: float = 0.5
+    model: Path = Path("models/hand_landmarker.task")
 
 
 @dataclass
@@ -319,6 +325,9 @@ def _from_raw(raw: dict, base_dir: Path, config_path: Path) -> AppConfig:
             scale=float(vis["scale"]),
             smoothing=float(vis["smoothing"]),
             match_distance=float(vis["match_distance"]),
+            hands=int(vis["hands"]),
+            min_confidence=float(vis["min_confidence"]),
+            model=_resolve_path(base_dir, vis["model"]),
         ),
         particles=ParticleConfig(
             style=str(parts["style"]),
@@ -359,6 +368,10 @@ def _validate(cfg: AppConfig) -> None:
         raise ConfigError("vision.morph_kernel must be a positive odd integer.")
     if cfg.vision.min_area < 1 or cfg.vision.max_blobs < 1:
         raise ConfigError("vision min_area and max_blobs must be at least 1.")
+    if not 1 <= cfg.vision.hands <= 4:
+        raise ConfigError("vision.hands must be from 1 to 4.")
+    if not 0 < cfg.vision.min_confidence <= 1:
+        raise ConfigError("vision.min_confidence must be in (0, 1].")
     if not 0 < cfg.vision.max_area_fraction <= 1:
         raise ConfigError("vision.max_area_fraction must be in (0, 1].")
     if any(v < 0 for v in cfg.roi):

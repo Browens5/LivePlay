@@ -73,6 +73,18 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual(cfg.calibration.path, root / "calib" / "empty_table.png")
             self.assertEqual(cfg.geometry.path, root / "calib" / "display_geometry.json")
             self.assertEqual(cfg.geometry.bits, 7)
+            self.assertEqual(cfg.vision.method, "mediapipe")
+            self.assertEqual(cfg.vision.hands, 2)
+            self.assertEqual(cfg.vision.model, root / "models" / "hand_landmarker.task")
+
+    def test_hand_count_must_be_in_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            data = json.loads((ROOT / "config.json").read_text())
+            data["vision"]["hands"] = 0
+            path.write_text(json.dumps(data))
+            with self.assertRaises(ConfigError):
+                load_config(parse_args(["--config", str(path)]))
 
 
 class DisplayChoiceTest(unittest.TestCase):

@@ -35,7 +35,7 @@
     "inset": 0
   },
   "vision": {
-    "method": "diff+skin",
+    "method": "mediapipe",
     "diff_threshold": 28,
     "min_area": 2200,
     "max_area_fraction": 0.2,
@@ -45,7 +45,10 @@
     "morph_kernel": 5,
     "scale": 0.5,
     "smoothing": 0.55,
-    "match_distance": 300
+    "match_distance": 300,
+    "hands": 2,
+    "min_confidence": 0.5,
+    "model": "models/hand_landmarker.task"
   },
   "particles": {
     "style": "sparks",

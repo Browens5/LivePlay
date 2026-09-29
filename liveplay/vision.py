@@ -7,8 +7,8 @@ The webcam looks at the TV, so the picture we draw is part of the scene.
 * Calibration is a flat gray screen with the table empty. The playfield
   stays that same gray. A gradient, photo, or bright scene would differ
   from the snapshot everywhere and look like a giant hand.
-* Hands are detected by difference from that snapshot, then gated with a
-  skin-color mask (`diff+skin`, the default). Bright particles fail the
+* The blob methods detect hands by difference from that snapshot, then
+  gate with a skin-color mask (`diff+skin`). Bright particles fail the
   skin test, so the game is less likely to chase its own sparks.
 * The pose drawn on the glass (cyan outline, green palm, blue fingertips)
   is the same idea: those hues are outside the skin bands, so the check
@@ -23,10 +23,9 @@ The webcam looks at the TV, so the picture we draw is part of the scene.
   Skin gating rejects most of them. A large washed-out reflection can
   still win. Dim the room or matte the plexi. See the README.
 
-This module does not know about particles or pygame. A MediaPipe hands
-backend, or anything that emits palm/fingertip centers, should implement
-`VisionBackend` and be constructed in `make_backend` without changes to
-capture or the renderer.
+This module does not know about particles or pygame. Palm centers from
+MediaPipe live in `liveplay/hands.py`. `make_backend` selects that
+backend when `vision.method` is `mediapipe`, and a blob backend otherwise.
 """
 
 from __future__ import annotations
@@ -186,13 +185,20 @@ class BlobVision:
         self.last_poses = [pose for _, _, pose in found]
         return [point for _, point, _ in found]
 
+    def close(self) -> None:
+        return
 
-def make_backend(cfg: VisionConfig, background: np.ndarray | None) -> BlobVision:
-    """Build the v0 backend.
 
-    Swap this function's body to select another `VisionBackend` later
-    (for example MediaPipe hand centers). Callers only need `detect`.
+def make_backend(cfg: VisionConfig, background: np.ndarray | None):
+    """Build the vision backend. Callers only need `detect`.
+
+    `mediapipe` is the hand tracker (palm center, no snapshot). The blob
+    methods remain for machines that cannot import MediaPipe.
     """
+    if cfg.method == "mediapipe":
+        from liveplay.hands import HandVision
+
+        return HandVision(cfg)
     return BlobVision(cfg, background)
 
 
