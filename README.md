@@ -66,7 +66,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Runtime imports are `numpy`, `opencv-python-headless`, and `pygame`. Headless OpenCV avoids a second GUI toolkit next to pygame. If a Mac OpenCV build cannot see the webcam, install `opencv-python` instead of `opencv-python-headless`.
+Runtime imports are `numpy`, `opencv-python-headless`, and `pygame-ce` (imported as `pygame`). Headless OpenCV avoids a second GUI toolkit. If a Mac OpenCV build cannot see the webcam, install `opencv-python` instead of `opencv-python-headless`.
+
+`pygame-ce` is a drop-in pygame build with macOS wheels for Python 3.14. The original `pygame` package has none. On 3.14, pip compiles that package from source and `pygame.font` then crashes at startup with `cannot import name 'Font'` / `font module not available`. Operator text is drawn with OpenCV so that crash is not on the startup path, but the window still needs a real pygame build:
+
+```bash
+pip uninstall -y pygame
+pip install -r requirements.txt
+```
 
 The program does not open a socket. You can unplug Ethernet.
 

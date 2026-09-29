@@ -31,6 +31,7 @@ from liveplay.display import (
     draw_alignment_guides,
     draw_message,
     draw_points,
+    draw_status,
     fill_playfield,
     init_video,
     list_displays,
@@ -248,9 +249,7 @@ class Session:
         warning = self.backend.last_warning
         if not warning:
             return
-        font = self.pygame.font.Font(None, 36)
-        rendered = font.render(warning, True, (255, 230, 160))
-        self.screen.blit(rendered, (24, 24))
+        draw_status(self.screen, warning)
 
     def _on_missing_frame(self) -> None:
         self.fail_reads += 1
