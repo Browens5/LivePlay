@@ -176,6 +176,48 @@ def draw_alignment_guides(surface: pygame.Surface) -> None:
     pygame.draw.line(surface, color, (cx, cy - 16), (cx, cy + 16), 1)
 
 
+def fill_visible(surface: pygame.Surface, visible: tuple[int, int, int, int], gray: int) -> None:
+    """Gray only where the TV can show pixels. The cropped margin stays black."""
+    surface.fill((0, 0, 0))
+    x, y, width, height = visible
+    if width > 0 and height > 0:
+        pygame.draw.rect(surface, (gray, gray, gray), (x, y, width, height))
+
+
+def draw_visible_border(surface: pygame.Surface, visible: tuple[int, int, int, int]) -> None:
+    x, y, width, height = visible
+    if width > 1 and height > 1:
+        pygame.draw.rect(surface, (245, 245, 245), (x, y, width, height), 4)
+
+
+# RGB. Chosen so the overhead camera's HSV reading misses the skin bands
+# in vision.py (hue 0–20 and 170–180). Yellow and pink sit on those edges.
+POSE_OUTLINE = (40, 210, 255)
+POSE_PALM = (50, 230, 110)
+POSE_TIP = (90, 150, 255)
+
+
+def draw_poses(surface: pygame.Surface, poses) -> None:
+    """Project a hand outline, palm, and fingertips onto the glass.
+
+    The camera sees this drawing. The colors fail the skin gate, so the
+    pose itself is less likely to be tracked as another hand.
+    """
+    outline = POSE_OUTLINE
+    palm_color = POSE_PALM
+    tip_color = POSE_TIP
+    for pose in poses:
+        palm = (int(pose.x), int(pose.y))
+        if len(pose.contour) >= 3:
+            points = [(int(x), int(y)) for x, y in pose.contour]
+            pygame.draw.lines(surface, outline, True, points, 3)
+        pygame.draw.circle(surface, palm_color, palm, max(10, int(pose.size * 0.35)), 3)
+        for tip_x, tip_y in pose.fingertips:
+            tip = (int(tip_x), int(tip_y))
+            pygame.draw.line(surface, outline, palm, tip, 2)
+            pygame.draw.circle(surface, tip_color, tip, 7)
+
+
 def draw_points(surface: pygame.Surface, points: list[InteractionPoint]) -> None:
     for point in points:
         color = (255, 210, 70) if point.is_new else (80, 255, 140)

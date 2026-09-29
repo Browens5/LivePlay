@@ -10,6 +10,9 @@ The webcam looks at the TV, so the picture we draw is part of the scene.
 * Hands are detected by difference from that snapshot, then gated with a
   skin-color mask (`diff+skin`, the default). Bright particles fail the
   skin test, so the game is less likely to chase its own sparks.
+* The pose drawn on the glass (cyan outline, green palm, blue fingertips)
+  is the same idea: those hues are outside the skin bands, so the check
+  image is not a second hand.
 * Small blobs are dropped. Particle specks are smaller than a hand.
 * `track_dark_blobs` is off by default. Turn it on for dark toys. It will
   also see some shadows and heavy glare edges.
@@ -37,6 +40,7 @@ import cv2
 import numpy as np
 
 from liveplay.config import VisionConfig
+from liveplay.geometry import HandPose
 from liveplay.points import InteractionPoint
 
 # OpenCV HSV hue is 0..180. These bands cover typical skin under indoor
@@ -72,6 +76,7 @@ class BlobVision:
         self.background: np.ndarray | None = None
         self._bg_ready: np.ndarray | None = None
         self.last_warning: str | None = None
+        self.last_poses: list[HandPose] = []
         kernel = cfg.morph_kernel
         self._kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel, kernel))
         if background is not None:
@@ -95,6 +100,7 @@ class BlobVision:
 
     def detect(self, frame_bgr: np.ndarray) -> list[InteractionPoint]:
         self.last_warning = None
+        self.last_poses = []
         if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             self.last_warning = "Camera frame was not a color image."
             return []
@@ -167,9 +173,18 @@ class BlobVision:
             cx = float(moments["m10"] / moments["m00"]) / scale
             cy = float(moments["m01"] / moments["m00"]) / scale
             radius = (area / np.pi) ** 0.5 / scale
-            found.append((area, InteractionPoint(x=cx, y=cy, size=radius)))
+            full = np.round(contour.astype(np.float32) / scale).astype(np.int32)
+            if len(full) >= 5:
+                epsilon = 0.012 * cv2.arcLength(full, True)
+                full = cv2.approxPolyDP(full, max(epsilon, 1.0), True)
+            outline = [(float(p[0][0]), float(p[0][1])) for p in full]
+            tips = _fingertips(full, (cx, cy))
+            pose = HandPose(x=cx, y=cy, size=radius, contour=outline, fingertips=tips)
+            found.append((area, InteractionPoint(x=cx, y=cy, size=radius), pose))
         found.sort(key=lambda item: item[0], reverse=True)
-        return [point for _, point in found[: self.cfg.max_blobs]]
+        found = found[: self.cfg.max_blobs]
+        self.last_poses = [pose for _, _, pose in found]
+        return [point for _, point, _ in found]
 
 
 def make_backend(cfg: VisionConfig, background: np.ndarray | None) -> BlobVision:
@@ -195,6 +210,39 @@ def _skin_mask(frame_bgr: np.ndarray) -> np.ndarray:
     low = cv2.inRange(hsv, _SKIN_LOW_1, _SKIN_HIGH_1)
     high = cv2.inRange(hsv, _SKIN_LOW_2, _SKIN_HIGH_2)
     return cv2.bitwise_or(low, high)
+
+
+def _fingertips(contour: np.ndarray, center: tuple[float, float]) -> list[tuple[float, float]]:
+    """Hull points separated by a deep valley. A fist often has none.
+
+    Depth from OpenCV is in eighths of a pixel (value / 256).
+    """
+    if contour is None or len(contour) < 8:
+        return []
+    hull = cv2.convexHull(contour, returnPoints=False)
+    if hull is None or len(hull) < 4:
+        return []
+    try:
+        defects = cv2.convexityDefects(contour, hull)
+    except cv2.error:
+        return []
+    if defects is None:
+        return []
+    # OpenCV 4 returns (N, 1, 4). Some builds return (N, 4). Both are four ints.
+    rows = np.reshape(np.asarray(defects), (-1, 4))
+    tips: list[tuple[float, float]] = []
+    for row in rows:
+        start, end, _far, depth = int(row[0]), int(row[1]), int(row[2]), int(row[3])
+        if depth / 256.0 < 10.0:
+            continue
+        for index in (start, end):
+            x, y = contour[index, 0]
+            tip = (float(x), float(y))
+            if all((tip[0] - kept[0]) ** 2 + (tip[1] - kept[1]) ** 2 > 14.0 ** 2 for kept in tips):
+                tips.append(tip)
+    cx, cy = center
+    tips.sort(key=lambda tip: -((tip[0] - cx) ** 2 + (tip[1] - cy) ** 2))
+    return tips[:5]
 
 
 def _dark_mask(frame_bgr: np.ndarray, background_bgr: np.ndarray, delta: int) -> np.ndarray:

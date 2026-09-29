@@ -28,6 +28,12 @@
     "path": "calib/empty_table.png",
     "gray": 90
   },
+  "geometry": {
+    "path": "calib/display_geometry.json",
+    "bits": 7,
+    "settle": 0.32,
+    "inset": 12
+  },
   "vision": {
     "method": "diff+skin",
     "diff_threshold": 28,

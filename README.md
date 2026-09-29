@@ -26,10 +26,11 @@ One Python process. The stages are separate modules so a second mode can be adde
 | Stage | Module | What it does |
 | --- | --- | --- |
 | Capture | `liveplay/capture.py` | Open the webcam (AVFoundation on macOS), drop the frame queue, crop or warp so the image lines up with the TV. |
-| Vision | `liveplay/vision.py` | `VisionBackend`: one mapped frame in, a list of points out. v0 is background subtraction plus an optional skin-color gate. |
+| Display fit | `liveplay/geometry.py` | Gray-code scan. Finds the framebuffer rectangle the panel actually lights, and the camera-to-screen map. |
+| Vision | `liveplay/vision.py` | `VisionBackend`: one mapped frame in, a list of points out. v0 is background subtraction plus an optional skin-color gate. It also keeps a hand outline for the pose check. |
 | Points | `liveplay/points.py` | `{x, y, size, vx, vy}` in TV pixels. `x, y` are the screen. Velocity is pixels per second. |
 | Game | `liveplay/particles.py` | Spawn, attract, fade. The only input is that point list. |
-| Display | `liveplay/display.py`, `liveplay/app.py` | Fullscreen 1920×1080 on the table, or a window for setup. |
+| Display | `liveplay/display.py`, `liveplay/app.py` | Fullscreen 1920×1080 on the table, or a window for setup. Play draws only inside the measured rectangle. |
 
 `make_backend()` in `liveplay/vision.py` is the extension point. A later MediaPipe hands backend, or a toy-scene mode, should implement `VisionBackend.detect()` and be chosen there. A second game should branch in `Session._tick` and consume `InteractionPoint` only. It should not open the camera itself.
 
@@ -48,6 +49,8 @@ On the Vizio, turn off the processing that adds lag and crops the picture:
 - Turn **motion smoothing / ClearAction** off.
 - Turn **overscan** off (Just Scan, Dot by Dot, or 1:1 — the name varies). A cropped HDMI image makes fingers miss the particles.
 - The TV’s own processing is often a bigger delay than this program. The in-app budget is about one camera frame plus a few milliseconds of blob detection. A TV in cinema mode can spend the whole 100 ms by itself.
+
+Cheap panels still crop the HDMI image after those settings. Before play, a real webcam run paints Gray-code stripes and reads them back. Each camera pixel reports the framebuffer coordinate it sees, so the app learns the lit rectangle and draws only there. The margin the TV throws away stays black. Hand positions go through the same map, so a pose drawn on the glass sits under the hand. The result is `calib/display_geometry.json` (gitignored, this TV only). **G** measures again.
 
 On the Mac:
 
@@ -120,33 +123,27 @@ The webcam is cropped and stretched to the full TV. White corner ticks mark the 
 
 `roi` of `0,0,0,0` means the full camera frame. If the TV is tilted in the image, set `perspective` to four camera-pixel corners in order: top-left, top-right, bottom-right, bottom-left. That warp replaces the crop. If `undistort.enabled` is on, those points are in the undistorted image.
 
-### 2. Empty-table calibration, then the blob overlay
-
-The camera sees the TV. Calibration paints the screen flat gray (`calibration.gray`, default 90) and stores what “nothing on the glass” looks like, including static glare.
-
-```bash
-python -m liveplay --mode calibrate
-```
-
-Clear hands and toys. Press **Space**. The instructions disappear and the screen stays gray for a moment so the snapshot does not memorize the text. The file is `calib/empty_table.png` (gitignored).
-
-Then:
-
-```bash
-python -m liveplay --mode overlay
-```
-
-Or press **2**. Green circles should sit on a hand and not on the empty glass. Press **C** any time to snapshot again. Recalibrate when you change lights, the crop, the gray level, or the camera.
-
-Play and overlay refuse to guess. If the snapshot is missing or the wrong size, the screen switches to calibration and says so. A corrupt file is an on-screen error, not a hang.
-
-### 3. Particles
+### 2. Measure the TV, then the empty table
 
 ```bash
 python -m liveplay --mode play
 ```
 
-Or press **3**. Passthrough turns off. The field is the same flat gray as calibration, and particles follow the tracked blobs. Styles: `sparks` (default), `blobs`, `trails`.
+On a real webcam this does three checks before any particles:
+
+1. **Display scan.** Stripes run for about ten seconds (`geometry.bits` 7 and `geometry.settle` 0.32). Keep hands off the glass and leave the webcam still. The terminal prints `display scan 1/30` and so on. When it finishes, a white frame marks the rectangle the panel actually shows. That frame should sit just inside the glass, not off in the bezel. If the stripes were unreadable, the screen says why. **Space** tries again. A slow TV wants a larger `geometry.settle`.
+2. **Empty-table snapshot.** The scan changes the mapping, so the previous photo is discarded. Clear the table and press **Space**. The words disappear and the panel stays gray for a moment so the snapshot does not memorize the text. The file is `calib/empty_table.png` (gitignored).
+3. **Pose check.** A cyan outline, green palm, and blue fingertips are drawn on the glass under a hand. They should sit on the hand, inside the white frame. **Space** starts the particles. **H** hides the pose later. **G** measures the TV again.
+
+The camera sees the TV. The snapshot is what “nothing on the glass” looks like, including static glare, after the image has been mapped onto the framebuffer. Play and overlay refuse to guess. If the snapshot is missing or the wrong size, the screen switches to calibration and says so. A corrupt file is an on-screen error, not a hang.
+
+Overlay (press **2**, or `--mode overlay`) still shows the stretched camera with green circles. That view is for the crop, not the overscan fit. Recalibrate when you change lights, the crop, the gray level, or the camera. Remeasure (**G**) when you move the TV or the webcam.
+
+`--fake-camera` cannot see the stripes, so it skips the scan and the pose check.
+
+### 3. Particles
+
+After **Space** on the pose check, the field is the same flat gray as calibration, drawn only inside the measured rectangle. Particles follow the tracked blobs. The hand outline stays on by default. Styles: `sparks` (default), `blobs`, `trails`.
 
 ```bash
 python -m liveplay --particle-style blobs
@@ -158,7 +155,7 @@ python -m liveplay --particle-style blobs
 caffeinate -d python -m liveplay --display 1
 ```
 
-Fullscreen, hidden cursor, no menu. **Esc** or **Cmd+Q** quits. **1 / 2 / 3 / C** are adult shortcuts to the modes above.
+Fullscreen, hidden cursor, no menu. The first launch measures the TV, snapshots the empty glass, and waits on the pose check. Later launches reuse `calib/display_geometry.json` and go straight to the pose check. **Esc** or **Cmd+Q** quits. **1 / 2 / 3 / C / G** are adult shortcuts.
 
 ## Config
 
@@ -177,6 +174,10 @@ Fullscreen, hidden cursor, no menu. **Esc** or **Cmd+Q** quits. **1 / 2 / 3 / C*
 | `display.prefer_external` | `true` | With several displays, prefer a non-primary 1920×1080, else the last one. |
 | `calibration.path` | `calib/empty_table.png` | Empty-table snapshot. CLI: `--calibration`. |
 | `calibration.gray` | `90` | Flat playfield and calibration screen, 0–255. Change it and snapshot again. |
+| `geometry.path` | `calib/display_geometry.json` | Lit rectangle and camera-to-screen map. Written by the scan. |
+| `geometry.bits` | `7` | Gray-code planes per axis. 7 is 128 steps across the framebuffer. |
+| `geometry.settle` | `0.32` | Seconds a stripe must stay up before the camera frame counts. Raise it if the scan fails. |
+| `geometry.inset` | `12` | Pixels pulled in from the measured edge so content stays off the fuzzy crop. |
 | `vision.method` | `diff+skin` | `diff`, `skin`, or `diff+skin`. CLI: `--vision`. |
 | `vision.diff_threshold` | `28` | How different a pixel must be from the snapshot. |
 | `vision.min_area` | `2200` | Smallest blob, in full-screen pixels. Hands pass; particle specks do not. |
@@ -192,8 +193,10 @@ The webcam is pointed at the display. A few rules keep the particles from being 
 
 - Calibrate on flat gray, and keep the playfield that same gray. A photo or a gradient would differ from the snapshot everywhere.
 - Prefer `diff+skin`. Sparks are bright but not skin-colored, so they fail the gate. The ranges live in `liveplay/vision.py` (`_SKIN_LOW_1` and the second red wrap).
-- Ignore blobs smaller than `vision.min_area`.
+- The pose overlay is cyan, green, and blue for the same reason. Those hues miss the skin bands, so the check drawing is not a second hand.
+- Ignore blobs smaller than `vision.min_area`. With a measured TV, that area is in framebuffer pixels (the warped image), not raw camera pixels.
 - Fade particles toward that gray, not toward black, so they don’t become fake dark toys.
+- Draw only inside the measured rectangle. Pixels the panel cannot show stay black and are not part of the playfield the camera memorizes.
 - The capture code asks the camera for manual exposure. Many webcams ignore it. If blobs drift after a few minutes, lock exposure in the camera’s own tool and recalibrate.
 
 More detail is commented in `liveplay/vision.py`, `liveplay/capture.py`, and `liveplay/display.py`.
@@ -203,9 +206,13 @@ More detail is commented in `liveplay/vision.py`, `liveplay/capture.py`, and `li
 | Key | When | Action |
 | --- | --- | --- |
 | Esc, Cmd+Q, Ctrl+Q | always | Quit |
-| 1 / 2 / 3 | always | Passthrough / overlay / play |
-| C | always | Calibration (flat gray) |
+| 1 / 2 / 3 | except during a scan | Passthrough / overlay / play |
+| C | except during a scan | Calibration (flat gray) |
+| G | except during a scan | Measure the TV again |
+| H | play | Hide or show the hand pose |
 | Space | calibration | Snapshot the empty table |
+| Space | pose check | Start the particles |
+| Space | failed scan | Measure the TV again |
 | Arrows | passthrough, overlay | Move the crop |
 | Shift+arrows | passthrough, overlay | Resize the crop |
 | S | passthrough, overlay | Save the crop into `config.json` |
@@ -221,11 +228,14 @@ These print `[liveplay] error: …` and, once the window exists, show the same t
 
 A missing snapshot is not fatal: play/overlay switch to the calibration screen and wait for Space. The process does not sit there with a blank terminal.
 
+A failed display scan stays on screen (`The webcam cannot see a bright TV`, `The stripe pattern was unreadable`, and similar). **Space** runs it again. The scan does not hang on a black window.
+
 ## Known limitations
 
 - **Glare and reflections.** Ceiling lights bounce off the plexi and can look like blobs. Skin gating rejects many of them. A large washed-out patch can still win. Dim the room, use matte plexi, and raise `vision.diff_threshold` or `vision.min_area` if you get ghosts.
 - **Kids blocking the camera.** Points vanish and the particles fade. That is the whole model; there is no memory of a hand it cannot see.
-- **Not fingertips.** v0 tracks a blob center, not a pose. MediaPipe would be another `VisionBackend`, not a change to the game loop.
+- **Pose is a silhouette.** The outline, palm, and fingertips come from the blob contour and its convexity defects. A fist often has no fingertips. It is not a MediaPipe skeleton. A later backend can replace `BlobVision` without changing the drawing code.
+- **The scan needs a still camera and a panel that will show stripes.** Glare, a hand on the glass, or a TV that smears the image for longer than `geometry.settle` makes the codes unreadable. The screen says so.
 - **Skin color is a guess.** Colored gloves, very warm light, or a hand in deep shadow can miss. `--vision diff` is the fallback and will also see bright particles.
 - **Dark toys** are off until `vision.track_dark_blobs` is true. Shadows can then count too.
 - **Auto exposure and auto focus** still move on some UVC cameras. The props we set are best-effort.
@@ -252,7 +262,8 @@ liveplay/vision.py          VisionBackend and the blob detector
 liveplay/points.py          InteractionPoint and the frame-to-frame tracker
 liveplay/particles.py       spawn / attract / fade
 liveplay/calibration.py     empty-table snapshot
-liveplay/display.py         fullscreen window, guides, errors
+liveplay/geometry.py        display-limit scan and camera-to-screen map
+liveplay/display.py         fullscreen window, guides, hand pose, errors
 liveplay/app.py             modes and the main loop
 liveplay/config.py          config file and CLI
 ```
