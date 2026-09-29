@@ -1,29 +1,31 @@
-"""Local vision. One mapped camera frame in, interaction points out.
+"""Color-blob fallback. One mapped camera frame in, interaction points out.
+
+The default tracker is MediaPipe (`liveplay/hands.py`). This module runs
+when `vision.method` is `diff`, `skin`, or `diff+skin`.
 
 Feedback loop
 -------------
-The webcam looks at the TV, so the picture we draw is part of the scene.
+The webcam looks at the TV, so the picture on the glass is part of the scene.
 
-* Calibration is a flat gray screen with the table empty. The playfield
-  stays that same gray. A gradient, photo, or bright scene would differ
-  from the snapshot everywhere and look like a giant hand.
-* Hands are detected by difference from that snapshot, then gated with a
-  skin-color mask (`diff+skin`, the default). Bright particles fail the
-  skin test, so the game is less likely to chase its own sparks.
-* Small blobs are dropped. Particle specks are smaller than a hand.
-* `track_dark_blobs` is off by default. Turn it on for dark toys. It will
-  also see some shadows and heavy glare edges.
-* Auto exposure still breaks this: if the camera re-meters when particles
-  appear, the gray field no longer matches the snapshot. capture.py tries
-  to pin exposure; many webcams ignore it.
-* Ceiling lights reflecting on the plexiglass show up as bright blobs.
-  Skin gating rejects most of them. A large washed-out reflection can
-  still win. Dim the room or matte the plexi. See the README.
+* `diff` and `diff+skin` need a flat gray snapshot of the empty table.
+  Soccer stays that same gray. A photograph or a bright scene differs
+  from the snapshot everywhere and looks like one giant hand. The forest
+  is that kind of picture, so it needs MediaPipe, not this fallback.
+* `diff+skin` keeps a blob only when it is also skin-colored. The soccer
+  puck, ball, goals, and score miss that test. `diff` alone will track
+  those graphics.
+* `skin` does not need the snapshot. It still mistakes a skin-colored
+  drawing for a hand.
+* Small blobs are dropped (`vision.min_area`).
+* `track_dark_blobs` is off. Turn it on only for dark toys. Shadows and
+  hard glare edges can then count too.
+* Auto exposure still breaks subtraction: if the camera re-meters, the
+  gray field no longer matches the snapshot. capture.py asks for a locked
+  exposure. Many webcams ignore it.
+* Ceiling lights on the plexiglass are bright blobs. The skin gate
+  rejects most of them. A large washed-out reflection can still win.
 
-This module does not know about particles or pygame. A MediaPipe hands
-backend, or anything that emits palm/fingertip centers, should implement
-`VisionBackend` and be constructed in `make_backend` without changes to
-capture or the renderer.
+`make_backend` selects MediaPipe when `vision.method` is `mediapipe`.
 """
 
 from __future__ import annotations
@@ -169,15 +171,23 @@ class BlobVision:
             radius = (area / np.pi) ** 0.5 / scale
             found.append((area, InteractionPoint(x=cx, y=cy, size=radius)))
         found.sort(key=lambda item: item[0], reverse=True)
-        return [point for _, point in found[: self.cfg.max_blobs]]
+        found = found[: self.cfg.max_blobs]
+        return [point for _, point in found]
+
+    def close(self) -> None:
+        return
 
 
-def make_backend(cfg: VisionConfig, background: np.ndarray | None) -> BlobVision:
-    """Build the v0 backend.
+def make_backend(cfg: VisionConfig, background: np.ndarray | None):
+    """Build the vision backend. Callers only need `detect`.
 
-    Swap this function's body to select another `VisionBackend` later
-    (for example MediaPipe hand centers). Callers only need `detect`.
+    `mediapipe` is the hand tracker (palm center, no snapshot). The blob
+    methods remain for machines that cannot import MediaPipe.
     """
+    if cfg.method == "mediapipe":
+        from liveplay.hands import HandVision
+
+        return HandVision(cfg)
     return BlobVision(cfg, background)
 
 

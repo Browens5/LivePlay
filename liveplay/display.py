@@ -1,9 +1,9 @@
 """Fullscreen (or windowed) table display.
 
-The playfield is flat gray on purpose. The overhead camera sees this
-window. A picture, gradient, or bright background would be subtracted as
-a hand. Particles are drawn on top by the game; this module only owns
-the window, alignment guides, and operator messages.
+Soccer paints a flat gray field so the overhead camera is not looking at
+a picture. The forest fills the glass on purpose and relies on the
+hand-shape tracker. This module owns the window, the gray field, the
+score, operator text, and the overlay circles. The games draw themselves.
 """
 
 from __future__ import annotations
@@ -174,6 +174,62 @@ def draw_alignment_guides(surface: pygame.Surface) -> None:
     cx, cy = width // 2, height // 2
     pygame.draw.line(surface, color, (cx - 16, cy), (cx + 16, cy), 1)
     pygame.draw.line(surface, color, (cx, cy - 16), (cx, cy + 16), 1)
+
+
+def fill_visible(surface: pygame.Surface, visible: tuple[int, int, int, int], gray: int) -> None:
+    """Gray only where the TV can show pixels. The cropped margin stays black."""
+    surface.fill((0, 0, 0))
+    x, y, width, height = visible
+    if width > 0 and height > 0:
+        pygame.draw.rect(surface, (gray, gray, gray), (x, y, width, height))
+
+
+def draw_score(
+    surface: pygame.Surface,
+    left: int,
+    right: int,
+    box: tuple[int, int, int, int],
+    left_color: tuple[int, int, int],
+    right_color: tuple[int, int, int],
+    gray: int = 90,
+) -> None:
+    """Left score, a dash, and right score, centered on the top edge of `box`."""
+    x, y, width, height = (int(v) for v in box)
+    if width < 8 or height < 8:
+        return
+    scale = max(1.3, min(3.2, height / 360.0))
+    thickness = 3 if scale >= 2.0 else 2
+    left_text = str(int(left))
+    right_text = str(int(right))
+    dash = "-"
+    gap = max(10, int(16 * scale))
+    left_w = _text_width(left_text, scale, thickness)
+    dash_w = _text_width(dash, scale, thickness)
+    right_w = _text_width(right_text, scale, thickness)
+    line_h, baseline = _line_metrics(scale, thickness)
+    pad = 6
+    image_w = pad * 2 + left_w + gap + dash_w + gap + right_w
+    image_h = pad * 2 + line_h + baseline
+    image = np.full((image_h, image_w, 3), gray, dtype=np.uint8)
+    cursor_y = pad + line_h
+    cursor_x = pad
+    cv2.putText(
+        image, left_text, (cursor_x, cursor_y), _FONT, scale,
+        (left_color[2], left_color[1], left_color[0]), thickness, cv2.LINE_AA,
+    )
+    cursor_x += left_w + gap
+    cv2.putText(
+        image, dash, (cursor_x, cursor_y), _FONT, scale,
+        (245, 245, 245), thickness, cv2.LINE_AA,
+    )
+    cursor_x += dash_w + gap
+    cv2.putText(
+        image, right_text, (cursor_x, cursor_y), _FONT, scale,
+        (right_color[2], right_color[1], right_color[0]), thickness, cv2.LINE_AA,
+    )
+    pos_x = x + max(0, (width - image_w) // 2)
+    pos_y = y + max(6, int(height * 0.015))
+    _blit_bgr_at(surface, image, (pos_x, pos_y))
 
 
 def draw_points(surface: pygame.Surface, points: list[InteractionPoint]) -> None:

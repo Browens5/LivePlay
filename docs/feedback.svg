@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" role="img" aria-labelledby="fb-title fb-desc">
+  <title id="fb-title">The camera sees the game</title>
+  <desc id="fb-desc">The television picture comes back through the webcam. Soccer stays gray and avoids skin colors so a color tracker can ignore it. The forest is a full picture, so it needs a hand-shape tracker instead of color subtraction.</desc>
+  <rect width="960" height="640" fill="#f6f3ee"/>
+  <text x="36" y="42" fill="#1b2430" font-family="Georgia, 'Iowan Old Style', Palatino, serif" font-size="26">The camera sees the game</text>
+  <text x="36" y="68" fill="#5c6670" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="14">The next frame contains the hands and whatever the television just drew.</text>
+
+  <!-- Loop -->
+  <g font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif">
+    <rect x="36" y="96" width="200" height="64" rx="12" fill="#ffffff" stroke="#e3dcd2"/>
+    <text x="136" y="124" text-anchor="middle" fill="#1b2430" font-size="14" font-weight="600">Draw a frame</text>
+    <text x="136" y="144" text-anchor="middle" fill="#5c6670" font-size="12">soccer or forest</text>
+
+    <rect x="272" y="96" width="200" height="64" rx="12" fill="#ffffff" stroke="#e3dcd2"/>
+    <text x="372" y="124" text-anchor="middle" fill="#1b2430" font-size="14" font-weight="600">The panel lights up</text>
+    <text x="372" y="144" text-anchor="middle" fill="#5c6670" font-size="12">only the lit rectangle</text>
+
+    <rect x="508" y="96" width="220" height="64" rx="12" fill="#ffffff" stroke="#e3dcd2"/>
+    <text x="618" y="124" text-anchor="middle" fill="#1b2430" font-size="14" font-weight="600">The webcam records it</text>
+    <text x="618" y="144" text-anchor="middle" fill="#5c6670" font-size="12">hands plus the picture</text>
+
+    <rect x="764" y="96" width="160" height="64" rx="12" fill="#e7f3f0" stroke="#b7d9d2"/>
+    <text x="844" y="124" text-anchor="middle" fill="#1b2430" font-size="14" font-weight="600">Keep hands</text>
+    <text x="844" y="144" text-anchor="middle" fill="#1f6f62" font-size="12">drop the drawing</text>
+  </g>
+  <g fill="none" stroke="#1f6f62" stroke-width="1.6">
+    <line x1="236" y1="128" x2="264" y2="128"/>
+    <line x1="472" y1="128" x2="500" y2="128"/>
+    <line x1="728" y1="128" x2="756" y2="128"/>
+  </g>
+  <g fill="#1f6f62">
+    <polygon points="264,123 264,133 272,128"/>
+    <polygon points="500,123 500,133 508,128"/>
+    <polygon points="756,123 756,133 764,128"/>
+  </g>
+  <path d="M844 160 C844 188 136 188 136 168" fill="none" stroke="#c45c26" stroke-width="1.6"/>
+  <polygon points="131,176 141,176 136,168" fill="#c45c26"/>
+
+  <!-- Two games -->
+  <rect x="36" y="214" width="432" height="390" rx="16" fill="#ffffff" stroke="#e3dcd2"/>
+  <rect x="492" y="214" width="432" height="390" rx="16" fill="#ffffff" stroke="#e3dcd2"/>
+
+  <text x="56" y="246" fill="#8a8175" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" letter-spacing="1.4">SOCCER</text>
+  <text x="512" y="246" fill="#8a8175" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" letter-spacing="1.4">FOREST</text>
+
+  <!-- Soccer preview: gray field, goals, ball, puck -->
+  <rect x="56" y="262" width="392" height="110" rx="8" fill="#5a5a5a"/>
+  <rect x="68" y="292" width="16" height="50" rx="3" fill="#3296ff"/>
+  <rect x="420" y="292" width="16" height="50" rx="3" fill="#32dc78"/>
+  <circle cx="252" cy="318" r="12" fill="#f8f8f8"/>
+  <circle cx="168" cy="330" r="14" fill="#28d2ff"/>
+  <circle cx="168" cy="330" r="6" fill="#082878"/>
+  <text x="252" y="286" text-anchor="middle" fill="#f2f2f2" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">1 - 0</text>
+
+  <clipPath id="forest-preview">
+    <rect x="512" y="262" width="392" height="110" rx="8"/>
+  </clipPath>
+  <g clip-path="url(#forest-preview)">
+    <rect x="512" y="262" width="392" height="110" fill="#7ebae0"/>
+    <rect x="512" y="328" width="392" height="44" fill="#4e9244"/>
+    <polygon points="560,328 610,286 660,328" fill="#768498"/>
+    <polygon points="596,300 610,286 624,300" fill="#ecf2f6"/>
+    <rect x="692" y="300" width="14" height="28" fill="#d7f3fb"/>
+    <ellipse cx="742" cy="346" rx="36" ry="14" fill="#2a7ab0"/>
+    <rect x="800" y="300" width="8" height="28" fill="#3d6b32"/>
+    <circle cx="804" cy="292" r="14" fill="#2f6a38"/>
+    <ellipse cx="860" cy="346" rx="18" ry="9" fill="#6aaa3a"/>
+    <circle cx="874" cy="338" r="6" fill="#d7a441"/>
+    <ellipse cx="648" cy="348" rx="14" ry="7" fill="#3f8f4a"/>
+    <circle cx="660" cy="342" r="5" fill="#3f8f4a"/>
+    <circle cx="663" cy="341" r="1" fill="#1b2430"/>
+  </g>
+
+  <g font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#1b2430">
+    <text x="56" y="408">The field is the same gray as an empty table.</text>
+    <text x="56" y="432">A hand is a change from that gray, and the</text>
+    <text x="56" y="452">change has to look like skin.</text>
+    <text x="56" y="484">Goals, the ball, and the puck are blue, green,</text>
+    <text x="56" y="504">white, and cyan. They miss the skin test.</text>
+    <text x="56" y="536">The puck is a disc, so it is not a second hand.</text>
+    <text x="56" y="572" fill="#1f6f62">MediaPipe or the color fallback can both run.</text>
+
+    <text x="512" y="408">The painting covers the glass.</text>
+    <text x="512" y="432">Every tree differs from the empty gray photo,</text>
+    <text x="512" y="452">so color subtraction sees a table of hands.</text>
+    <text x="512" y="484">MediaPipe asks whether a region is a hand.</text>
+    <text x="512" y="504">Trees, water, and the dinosaur are not.</text>
+    <text x="512" y="536">Spread the fingers a little. The camera sees</text>
+    <text x="512" y="556">the back of the hand.</text>
+    <text x="512" y="572" fill="#c45c26">This mode needs the hand model.</text>
+  </g>
+</svg>

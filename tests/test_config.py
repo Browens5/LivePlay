@@ -25,8 +25,6 @@ class ConfigTest(unittest.TestCase):
                         "passthrough",
                         "--camera",
                         "3",
-                        "--particle-style",
-                        "blobs",
                         "--vision",
                         "skin",
                         "--roi",
@@ -36,7 +34,6 @@ class ConfigTest(unittest.TestCase):
             )
             self.assertEqual(cfg.mode, "passthrough")
             self.assertEqual(cfg.camera.index, 3)
-            self.assertEqual(cfg.particles.style, "blobs")
             self.assertEqual(cfg.vision.method, "skin")
             self.assertEqual(cfg.roi, (4, 5, 6, 7))
             cfg.save()
@@ -71,6 +68,20 @@ class ConfigTest(unittest.TestCase):
             path.write_text((ROOT / "config.json").read_text())
             cfg = load_config(parse_args(["--config", str(path)]))
             self.assertEqual(cfg.calibration.path, root / "calib" / "empty_table.png")
+            self.assertEqual(cfg.geometry.path, root / "calib" / "display_geometry.json")
+            self.assertEqual(cfg.geometry.bits, 7)
+            self.assertEqual(cfg.vision.method, "mediapipe")
+            self.assertEqual(cfg.vision.hands, 2)
+            self.assertEqual(cfg.vision.model, root / "models" / "hand_landmarker.task")
+
+    def test_hand_count_must_be_in_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            data = json.loads((ROOT / "config.json").read_text())
+            data["vision"]["hands"] = 0
+            path.write_text(json.dumps(data))
+            with self.assertRaises(ConfigError):
+                load_config(parse_args(["--config", str(path)]))
 
 
 class DisplayChoiceTest(unittest.TestCase):

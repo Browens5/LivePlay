@@ -28,6 +28,9 @@ def _write_config(directory: Path, width: int = 640, height: int = 360) -> Path:
     data["display"]["fullscreen"] = False
     data["vision"]["min_area"] = 800
     data["vision"]["max_area_fraction"] = 0.5
+    # Boot the color tracker. The MediaPipe path has its own test and
+    # must not be required for these modes.
+    data["vision"]["method"] = "diff+skin"
     path = directory / "config.json"
     path.write_text(json.dumps(data))
     return path
@@ -41,7 +44,7 @@ class SmokeTest(unittest.TestCase):
             calibration = root / "empty.png"
             image = np.full((360, 640, 3), 90, dtype=np.uint8)
             self.assertTrue(cv2.imwrite(str(calibration), image))
-            for mode in ("passthrough", "overlay", "play", "calibrate"):
+            for mode in ("passthrough", "overlay", "play", "forest", "calibrate"):
                 output = io.StringIO()
                 with redirect_stdout(output), redirect_stderr(output):
                     code = main(
@@ -106,6 +109,69 @@ class SmokeTest(unittest.TestCase):
             text = output.getvalue()
             self.assertEqual(code, 1, text)
             self.assertIn("No camera at index 99", text)
+
+    def test_missing_hand_model_is_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _write_config(root)
+            data = json.loads(config.read_text())
+            data["vision"]["method"] = "mediapipe"
+            data["vision"]["model"] = "models/missing.task"
+            config.write_text(json.dumps(data))
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(output):
+                code = main(
+                    [
+                        "--config",
+                        str(config),
+                        "--fake-camera",
+                        "--windowed",
+                        "--frames",
+                        "2",
+                        "--mode",
+                        "play",
+                    ]
+                )
+            text = output.getvalue()
+            self.assertEqual(code, 1, text)
+            self.assertIn("Hand model not found", text)
+            self.assertIn("does not download", text)
+
+    def test_mediapipe_play_starts_without_a_snapshot(self) -> None:
+        try:
+            import mediapipe  # noqa: F401
+        except ImportError:
+            self.skipTest("mediapipe is not installed")
+        model = ROOT / "models" / "hand_landmarker.task"
+        if not model.is_file():
+            self.skipTest("hand model is not in the tree")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _write_config(root)
+            data = json.loads(config.read_text())
+            data["vision"]["method"] = "mediapipe"
+            data["vision"]["model"] = str(model)
+            config.write_text(json.dumps(data))
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(output):
+                code = main(
+                    [
+                        "--config",
+                        str(config),
+                        "--calibration",
+                        str(root / "missing.png"),
+                        "--fake-camera",
+                        "--windowed",
+                        "--frames",
+                        "3",
+                        "--mode",
+                        "play",
+                    ]
+                )
+            text = output.getvalue()
+            self.assertEqual(code, 0, text)
+            self.assertIn("mode play", text)
+            self.assertNotIn("no empty-table snapshot", text)
 
     def test_list_displays_returns(self) -> None:
         output = io.StringIO()

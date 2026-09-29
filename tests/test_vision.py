@@ -5,6 +5,7 @@ import numpy as np
 
 from liveplay.config import VisionConfig
 from liveplay.points import InteractionPoint, PointTracker
+from liveplay.soccer import BALL, GOAL_LEFT, GOAL_RIGHT, PUCK, PUCK_CORE
 from liveplay.vision import BlobVision
 
 
@@ -31,7 +32,7 @@ def _scene() -> tuple[np.ndarray, np.ndarray]:
     frame = background.copy()
     # Skin-toned hand near the center. BGR chosen to land in the HSV gate.
     cv2.ellipse(frame, (160, 90), (28, 20), 0, 0, 360, (100, 140, 200), -1)
-    # Bright cyan "particle". Difference says yes, skin says no.
+    # Bright cyan disc. Difference says yes, skin says no.
     cv2.circle(frame, (40, 40), 16, (255, 255, 40), -1)
     return background, frame
 
@@ -91,6 +92,17 @@ class VisionTest(unittest.TestCase):
         self.assertEqual(len(points), 1, backend.last_warning)
         self.assertLess(abs(points[0].x - 160), 25)
         self.assertLess(abs(points[0].y - 90), 25)
+
+    def test_soccer_colors_fail_the_skin_gate(self) -> None:
+        # The camera sees the goals, the ball, and the puck. Those drawings
+        # have to miss the skin bands or the color tracker chases the game.
+        frame = np.full((80, 320, 3), 90, dtype=np.uint8)
+        for index, rgb in enumerate((GOAL_LEFT, GOAL_RIGHT, BALL, PUCK, PUCK_CORE)):
+            bgr = (rgb[2], rgb[1], rgb[0])
+            x = 8 + index * 62
+            cv2.rectangle(frame, (x, 12), (x + 48, 68), bgr, thickness=-1)
+        backend = BlobVision(_vision(method="skin", min_area=80), None)
+        self.assertEqual(backend.detect(frame), [])
 
 
 class TrackerTest(unittest.TestCase):

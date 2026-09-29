@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 468" role="img" aria-labelledby="sys-title sys-desc">
+  <title id="sys-title">How Live Play is wired</title>
+  <desc id="sys-desc">A webcam looks down through plexiglass at a television. One local process captures the frame, fits it to the lit area of the panel, finds palm centers, and draws soccer or a forest back onto the screen. The camera then sees that picture.</desc>
+  <rect width="960" height="468" fill="#f6f3ee"/>
+  <text x="36" y="42" fill="#1b2430" font-family="Georgia, 'Iowan Old Style', Palatino, serif" font-size="26">How the table works</text>
+  <text x="36" y="68" fill="#5c6670" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="14">One process on the computer. The camera, the games, and the television stay in the room.</text>
+
+  <rect x="36" y="96" width="210" height="332" rx="16" fill="#ffffff" stroke="#e3dcd2"/>
+  <text x="52" y="122" fill="#8a8175" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" letter-spacing="1.4">ON THE TABLE</text>
+
+  <circle cx="141" cy="162" r="16" fill="#1b2430"/>
+  <circle cx="141" cy="162" r="7" fill="#d7ebe6"/>
+  <text x="141" y="198" text-anchor="middle" fill="#1b2430" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">Webcam</text>
+  <line x1="141" y1="208" x2="141" y2="226" stroke="#1f6f62" stroke-width="1.5"/>
+  <polygon points="136,222 146,222 141,230" fill="#1f6f62"/>
+
+  <rect x="62" y="238" width="158" height="8" rx="2" fill="#c8d5df"/>
+  <text x="141" y="262" text-anchor="middle" fill="#5c6670" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Plexiglass</text>
+  <ellipse cx="112" cy="288" rx="22" ry="12" fill="#e7b89a"/>
+  <ellipse cx="170" cy="288" rx="22" ry="12" fill="#e7b89a"/>
+  <text x="141" y="316" text-anchor="middle" fill="#5c6670" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Hands on the glass</text>
+
+  <rect x="62" y="332" width="158" height="52" rx="6" fill="#243044"/>
+  <rect x="72" y="340" width="138" height="36" rx="3" fill="#6a7380"/>
+  <text x="141" y="410" text-anchor="middle" fill="#1b2430" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">Television</text>
+
+  <text x="278" y="122" fill="#8a8175" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" letter-spacing="1.4">EACH FRAME</text>
+
+  <g font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif">
+    <rect x="278" y="146" width="118" height="92" rx="12" fill="#ffffff" stroke="#e3dcd2"/>
+    <text x="337" y="182" text-anchor="middle" fill="#1b2430" font-size="15" font-weight="600">Capture</text>
+    <text x="337" y="206" text-anchor="middle" fill="#5c6670" font-size="12">1280x720</text>
+
+    <rect x="422" y="146" width="118" height="92" rx="12" fill="#ffffff" stroke="#e3dcd2"/>
+    <text x="481" y="182" text-anchor="middle" fill="#1b2430" font-size="15" font-weight="600">Fit</text>
+    <text x="481" y="206" text-anchor="middle" fill="#5c6670" font-size="12">lit rectangle</text>
+
+    <rect x="566" y="146" width="118" height="92" rx="12" fill="#e7f3f0" stroke="#b7d9d2"/>
+    <text x="625" y="182" text-anchor="middle" fill="#1b2430" font-size="15" font-weight="600">Palms</text>
+    <text x="625" y="206" text-anchor="middle" fill="#1f6f62" font-size="12">two centers</text>
+
+    <rect x="710" y="146" width="118" height="92" rx="12" fill="#ffffff" stroke="#e3dcd2"/>
+    <text x="769" y="182" text-anchor="middle" fill="#1b2430" font-size="15" font-weight="600">Game</text>
+    <text x="769" y="206" text-anchor="middle" fill="#5c6670" font-size="12">soccer, forest</text>
+
+    <rect x="854" y="146" width="70" height="92" rx="12" fill="#243044"/>
+    <text x="889" y="188" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">TV</text>
+    <text x="889" y="210" text-anchor="middle" fill="#c5d0dc" font-size="11">1080p</text>
+  </g>
+
+  <g fill="none" stroke="#1f6f62" stroke-width="1.6">
+    <line x1="396" y1="192" x2="414" y2="192"/>
+    <line x1="540" y1="192" x2="558" y2="192"/>
+    <line x1="684" y1="192" x2="702" y2="192"/>
+    <line x1="828" y1="192" x2="846" y2="192"/>
+  </g>
+  <g fill="#1f6f62">
+    <polygon points="414,187 414,197 422,192"/>
+    <polygon points="558,187 558,197 566,192"/>
+    <polygon points="702,187 702,197 710,192"/>
+    <polygon points="846,187 846,197 854,192"/>
+  </g>
+
+  <path d="M889 238 C889 300 337 300 337 246" fill="none" stroke="#c45c26" stroke-width="1.6"/>
+  <polygon points="332,254 342,254 337,246" fill="#c45c26"/>
+  <text x="613" y="328" text-anchor="middle" fill="#c45c26" font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">The webcam is aimed at the television, so the next frame includes the game.</text>
+
+  <g font-family="ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#5c6670">
+    <text x="278" y="372">The first launch measures the panel with gray-code stripes.</text>
+    <text x="278" y="394">After that, both games draw only inside the lit rectangle.</text>
+    <text x="278" y="428">Palm centers are screen points. The games never open the camera.</text>
+  </g>
+</svg>

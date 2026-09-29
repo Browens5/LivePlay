@@ -14,9 +14,8 @@ from pathlib import Path
 
 from liveplay.errors import ConfigError
 
-MODES = ("passthrough", "overlay", "play", "calibrate")
-VISION_METHODS = ("diff", "skin", "diff+skin")
-PARTICLE_STYLES = ("sparks", "blobs", "trails")
+MODES = ("passthrough", "overlay", "play", "forest", "calibrate", "geometry")
+VISION_METHODS = ("mediapipe", "diff", "skin", "diff+skin")
 
 DEFAULTS: dict = {
     "camera": {"index": 0, "width": 1280, "height": 720, "fps": 30},
@@ -32,7 +31,7 @@ DEFAULTS: dict = {
     },
     "calibration": {"path": "calib/empty_table.png", "gray": 90},
     "vision": {
-        "method": "diff+skin",
+        "method": "mediapipe",
         "diff_threshold": 28,
         "min_area": 2200,
         "max_area_fraction": 0.2,
@@ -43,14 +42,15 @@ DEFAULTS: dict = {
         "scale": 0.5,
         "smoothing": 0.55,
         "match_distance": 300,
+        "hands": 2,
+        "min_confidence": 0.5,
+        "model": "models/hand_landmarker.task",
     },
-    "particles": {
-        "style": "sparks",
-        "max_count": 450,
-        "spawn_per_point": 3,
-        "fade_per_second": 0.7,
-        "attract": 900,
-        "splash": 16,
+    "geometry": {
+        "path": "calib/display_geometry.json",
+        "bits": 7,
+        "settle": 0.32,
+        "inset": 0,
     },
     "mode": "play",
 }
@@ -87,6 +87,14 @@ class CalibrationConfig:
 
 
 @dataclass
+class GeometryConfig:
+    path: Path
+    bits: int
+    settle: float
+    inset: int
+
+
+@dataclass
 class VisionConfig:
     method: str
     diff_threshold: int
@@ -99,16 +107,9 @@ class VisionConfig:
     scale: float
     smoothing: float
     match_distance: float
-
-
-@dataclass
-class ParticleConfig:
-    style: str
-    max_count: int
-    spawn_per_point: int
-    fade_per_second: float
-    attract: float
-    splash: int
+    hands: int = 2
+    min_confidence: float = 0.5
+    model: Path = Path("models/hand_landmarker.task")
 
 
 @dataclass
@@ -119,8 +120,8 @@ class AppConfig:
     undistort: UndistortConfig
     display: DisplayConfig
     calibration: CalibrationConfig
+    geometry: GeometryConfig
     vision: VisionConfig
-    particles: ParticleConfig
     mode: str
     fake_camera: bool
     frames: int
@@ -145,14 +146,14 @@ class AppConfig:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="liveplay",
-        description="Live Play v0 — local interactive table (no network).",
+        description="Live Play — local table games from an overhead webcam.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
             "  python -m liveplay --list-displays\n"
             "  python -m liveplay --mode passthrough\n"
             "  python -m liveplay --mode play --display 1\n"
-            "  python -m liveplay --camera 0 --particle-style blobs\n"
+            "  python -m liveplay --mode forest\n"
         ),
     )
     parser.add_argument("--config", type=Path, default=Path("config.json"))
@@ -172,7 +173,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fullscreen", action="store_true", help="Force fullscreen.")
     parser.add_argument("--roi", help="Camera crop x,y,w,h. w or h of 0 uses the full frame.")
     parser.add_argument("--calibration", type=Path, help="Empty-table snapshot path.")
-    parser.add_argument("--particle-style", choices=PARTICLE_STYLES)
     parser.add_argument("--vision", choices=VISION_METHODS)
     parser.add_argument(
         "--fake-camera",
@@ -243,8 +243,6 @@ def _apply_cli(cfg: AppConfig, args: argparse.Namespace) -> None:
                 base = Path(".")
             cal_path = base / cal_path
         cfg.calibration.path = cal_path
-    if args.particle_style is not None:
-        cfg.particles.style = args.particle_style
     if args.vision is not None:
         cfg.vision.method = args.vision
     cfg.fake_camera = bool(args.fake_camera)
@@ -258,12 +256,11 @@ def _from_raw(raw: dict, base_dir: Path, config_path: Path) -> AppConfig:
     und = raw["undistort"]
     disp = raw["display"]
     cal = raw["calibration"]
+    geo = raw["geometry"]
     vis = raw["vision"]
-    parts = raw["particles"]
     roi = raw["roi"]
-    cal_path = Path(cal["path"])
-    if not cal_path.is_absolute():
-        cal_path = base_dir / cal_path
+    cal_path = _resolve_path(base_dir, cal["path"])
+    geo_path = _resolve_path(base_dir, geo["path"])
     return AppConfig(
         camera=CameraConfig(
             index=int(cam["index"]),
@@ -286,6 +283,12 @@ def _from_raw(raw: dict, base_dir: Path, config_path: Path) -> AppConfig:
             prefer_external=bool(disp["prefer_external"]),
         ),
         calibration=CalibrationConfig(path=cal_path, gray=int(cal["gray"])),
+        geometry=GeometryConfig(
+            path=geo_path,
+            bits=int(geo["bits"]),
+            settle=float(geo["settle"]),
+            inset=int(geo["inset"]),
+        ),
         vision=VisionConfig(
             method=str(vis["method"]),
             diff_threshold=int(vis["diff_threshold"]),
@@ -298,14 +301,9 @@ def _from_raw(raw: dict, base_dir: Path, config_path: Path) -> AppConfig:
             scale=float(vis["scale"]),
             smoothing=float(vis["smoothing"]),
             match_distance=float(vis["match_distance"]),
-        ),
-        particles=ParticleConfig(
-            style=str(parts["style"]),
-            max_count=int(parts["max_count"]),
-            spawn_per_point=int(parts["spawn_per_point"]),
-            fade_per_second=float(parts["fade_per_second"]),
-            attract=float(parts["attract"]),
-            splash=int(parts["splash"]),
+            hands=int(vis["hands"]),
+            min_confidence=float(vis["min_confidence"]),
+            model=_resolve_path(base_dir, vis["model"]),
         ),
         mode=str(raw["mode"]),
         fake_camera=False,
@@ -320,8 +318,6 @@ def _validate(cfg: AppConfig) -> None:
         raise ConfigError(f"mode must be one of {MODES}.")
     if cfg.vision.method not in VISION_METHODS:
         raise ConfigError(f"vision.method must be one of {VISION_METHODS}.")
-    if cfg.particles.style not in PARTICLE_STYLES:
-        raise ConfigError(f"particles.style must be one of {PARTICLE_STYLES}.")
     if cfg.camera.index < 0:
         raise ConfigError("camera.index must be 0 or more.")
     if cfg.camera.fps <= 0 or cfg.camera.width < 16 or cfg.camera.height < 16:
@@ -338,6 +334,10 @@ def _validate(cfg: AppConfig) -> None:
         raise ConfigError("vision.morph_kernel must be a positive odd integer.")
     if cfg.vision.min_area < 1 or cfg.vision.max_blobs < 1:
         raise ConfigError("vision min_area and max_blobs must be at least 1.")
+    if not 1 <= cfg.vision.hands <= 4:
+        raise ConfigError("vision.hands must be from 1 to 4.")
+    if not 0 < cfg.vision.min_confidence <= 1:
+        raise ConfigError("vision.min_confidence must be in (0, 1].")
     if not 0 < cfg.vision.max_area_fraction <= 1:
         raise ConfigError("vision.max_area_fraction must be in (0, 1].")
     if any(v < 0 for v in cfg.roi):
@@ -349,10 +349,12 @@ def _validate(cfg: AppConfig) -> None:
             raise ConfigError(
                 "undistort.enabled is true but camera_matrix or dist_coeffs is missing."
             )
-    if cfg.particles.max_count < 1 or cfg.particles.spawn_per_point < 0:
-        raise ConfigError("particle counts are invalid.")
-    if cfg.particles.fade_per_second < 0 or cfg.particles.attract < 0:
-        raise ConfigError("particle fade and attract must be 0 or more.")
+    if not 4 <= cfg.geometry.bits <= 9:
+        raise ConfigError("geometry.bits must be from 4 to 9.")
+    if cfg.geometry.settle <= 0:
+        raise ConfigError("geometry.settle must be greater than 0.")
+    if cfg.geometry.inset < 0:
+        raise ConfigError("geometry.inset must be 0 or more.")
 
 
 def _validate_perspective(points: object) -> None:
@@ -366,6 +368,13 @@ def _validate_perspective(points: object) -> None:
             float(point[1])
         except (TypeError, ValueError) as exc:
             raise ConfigError("perspective coordinates must be numbers.") from exc
+
+
+def _resolve_path(base_dir: Path, value: object) -> Path:
+    path = Path(str(value))
+    if path.is_absolute():
+        return path
+    return base_dir / path
 
 
 def _parse_roi(text: str) -> tuple[int, int, int, int]:
