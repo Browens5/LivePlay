@@ -9,7 +9,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 from liveplay.config import VisionConfig
 from liveplay.errors import LivePlayError
-from liveplay.hands import HandVision, hand_center, open_landmarker, pack_frame, uses_metal
+from liveplay.hands import (
+    HandVision,
+    _MediaPipeDetector,
+    hand_center,
+    limit_metal_frame,
+    metal_frame_budget,
+    open_landmarker,
+    pack_frame,
+    uses_metal,
+)
 from liveplay.vision import BlobVision, make_backend
 
 
@@ -64,6 +73,124 @@ class MetalDelegateTest(unittest.TestCase):
         frame = np.zeros((4, 5, 3), dtype=np.uint8)
         self.assertEqual(pack_frame(frame, metal=True).shape, (4, 5, 4))
         self.assertEqual(pack_frame(frame, metal=False).shape, (4, 5, 3))
+
+
+class _Mark:
+    def __init__(self, x: float, y: float) -> None:
+        self.x = x
+        self.y = y
+
+
+class _Result:
+    def __init__(self, hands) -> None:
+        self.hand_landmarks = hands
+
+
+class _Graph:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.closed = False
+        self.seen: list[tuple[int, ...]] = []
+
+    def detect_for_video(self, image, timestamp_ms: int):
+        self.seen.append(tuple(image.data.shape))
+        hand = [_Mark(0.25, 0.5)] * 21
+        return _Result([hand])
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _Mp:
+    class ImageFormat:
+        SRGBA = 4
+        SRGB = 3
+
+    class Image:
+        def __init__(self, image_format, data) -> None:
+            self.image_format = image_format
+            self.data = data
+
+
+class MetalCacheTest(unittest.TestCase):
+    def test_a_large_frame_is_capped_on_the_long_side(self) -> None:
+        frame = np.zeros((1000, 2000, 3), dtype=np.uint8)
+        small = limit_metal_frame(frame)
+        self.assertEqual(small.shape, (320, 640, 3))
+        same = limit_metal_frame(np.zeros((100, 80, 3), dtype=np.uint8))
+        self.assertEqual(same.shape, (100, 80, 3))
+
+    def test_budget_shrinks_as_the_frame_grows(self) -> None:
+        small = metal_frame_budget(320, 180)
+        large = metal_frame_budget(640, 360)
+        self.assertGreater(small, large)
+        self.assertGreaterEqual(large, 12)
+        self.assertLessEqual(small, 300)
+
+    def test_the_mac_tracker_is_rebuilt_before_the_cache_fills(self) -> None:
+        first = _Graph("first")
+        second = _Graph("second")
+        opened = []
+
+        def reopen():
+            opened.append(second)
+            return second
+
+        detector = _MediaPipeDetector(
+            _Mp(),
+            first,
+            metal=True,
+            reopen=reopen,
+            frame_budget=lambda _w, _h: 3,
+            refresh_s=1e9,
+        )
+        frame = np.zeros((48, 64, 3), dtype=np.uint8)
+        for _ in range(3):
+            hands = detector.detect(frame, 33)
+            self.assertEqual(len(hands), 1)
+            self.assertEqual(hands[0][0], (0.25, 0.5))
+        self.assertFalse(first.closed)
+        self.assertEqual(opened, [])
+        detector.detect(frame, 66)
+        self.assertTrue(first.closed)
+        self.assertEqual(second.seen, [(48, 64, 4)])
+        self.assertEqual(first.seen, [(48, 64, 4)] * 3)
+
+    def test_a_failed_rebuild_keeps_the_current_tracker(self) -> None:
+        first = _Graph("first")
+
+        def reopen():
+            raise RuntimeError("metal busy")
+
+        detector = _MediaPipeDetector(
+            _Mp(),
+            first,
+            metal=True,
+            reopen=reopen,
+            frame_budget=lambda _w, _h: 1,
+            refresh_s=1e9,
+        )
+        frame = np.zeros((20, 20, 3), dtype=np.uint8)
+        detector.detect(frame, 1)
+        detector.detect(frame, 2)
+        self.assertFalse(first.closed)
+        self.assertEqual(len(first.seen), 2)
+
+    def test_the_cpu_tracker_is_not_rebuilt(self) -> None:
+        graph = _Graph("cpu")
+        detector = _MediaPipeDetector(
+            _Mp(),
+            graph,
+            metal=False,
+            reopen=lambda: (_ for _ in ()).throw(AssertionError("reopened")),
+            frame_budget=lambda _w, _h: 1,
+            refresh_s=0,
+        )
+        frame = np.zeros((16, 16, 3), dtype=np.uint8)
+        for stamp in range(5):
+            detector.detect(frame, stamp)
+        self.assertFalse(graph.closed)
+        self.assertEqual(graph.seen, [(16, 16, 3)] * 5)
 
 
 class PalmCenterTest(unittest.TestCase):
