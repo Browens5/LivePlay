@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 from liveplay.config import VisionConfig
 from liveplay.errors import LivePlayError
-from liveplay.hands import HandVision, hand_center, open_landmarker
+from liveplay.hands import HandVision, hand_center, open_landmarker, pack_frame, uses_metal
 from liveplay.vision import BlobVision, make_backend
 
 
@@ -52,6 +52,18 @@ class _Fake:
 
     def close(self) -> None:
         return
+
+
+class MetalDelegateTest(unittest.TestCase):
+    def test_only_macos_starts_the_metal_service(self) -> None:
+        self.assertTrue(uses_metal("darwin"))
+        self.assertFalse(uses_metal("linux"))
+        self.assertFalse(uses_metal("win32"))
+
+    def test_metal_frames_include_an_alpha_channel(self) -> None:
+        frame = np.zeros((4, 5, 3), dtype=np.uint8)
+        self.assertEqual(pack_frame(frame, metal=True).shape, (4, 5, 4))
+        self.assertEqual(pack_frame(frame, metal=False).shape, (4, 5, 3))
 
 
 class PalmCenterTest(unittest.TestCase):
