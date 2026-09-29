@@ -1,10 +1,9 @@
-"""One process: capture → vision → points → particles → the table TV.
+"""One process: capture → vision → points → soccer → the table TV.
 
 Modes
 -----
 geometry     Gray-code scan. Finds the framebuffer rectangle the TV shows.
-pose         Hand outline on that rectangle. Space starts the game.
-play         Particles plus the hand pose, inside the measured rectangle.
+play         Soccer. Hands bat the ball inside the measured rectangle.
 calibrate    Flat gray. SPACE snapshots the empty table.
 passthrough  Camera mapped onto the TV, with corner ticks.
 overlay      Live feed plus blob circles.
@@ -14,8 +13,7 @@ Adult keys (keyboard on the Mac, nothing drawn for kids to tap):
   1 / 2 / 3           passthrough / overlay / play
   C                   empty-table snapshot
   G                   measure the TV again
-  Space               snapshot, or start the game from the pose check
-  H                   hide or show the hand pose during play
+  Space               snapshot, or retry a failed scan
   Arrows              nudge the camera crop (passthrough and overlay)
   Shift+arrows        resize the crop
   S                   write the crop back to config.json
@@ -33,12 +31,9 @@ from liveplay.display import (
     blit_bgr,
     create_display,
     draw_alignment_guides,
-    draw_caption,
     draw_message,
     draw_points,
-    draw_poses,
     draw_status,
-    draw_visible_border,
     fill_playfield,
     fill_visible,
     init_video,
@@ -47,8 +42,8 @@ from liveplay.display import (
 )
 from liveplay.geometry import DisplayGeometry, DisplayScan, load_geometry, save_geometry
 from liveplay.errors import CalibrationError, CaptureError, ConfigError, LivePlayError
-from liveplay.particles import ParticleSystem
 from liveplay.points import PointTracker
+from liveplay.soccer import SoccerGame
 from liveplay.vision import BlobVision, make_backend
 
 # How long the screen stays pure gray before we trust the camera frame.
@@ -133,7 +128,6 @@ class Session:
         self._shown_warning: str | None = None
         self._log_at = time.perf_counter()
         self._last_points = 0
-        self.show_poses = True
         self.scan: DisplayScan | None = None
         self._scan_error_printed = False
         frame_size = (screen.get_width(), screen.get_height())
@@ -145,11 +139,11 @@ class Session:
         background = self._load_background()
         self.backend: BlobVision = make_backend(cfg.vision, background)
         self.tracker = PointTracker(cfg.vision.match_distance, cfg.vision.smoothing)
-        self.particles = ParticleSystem(cfg.particles)
+        self.soccer = SoccerGame()
         self._enter_startup_mode()
         print(
-            f"[liveplay] mode {self.mode}  vision {cfg.vision.method}  "
-            f"particles {cfg.particles.style}. Esc or Cmd/Ctrl+Q quits."
+            f"[liveplay] mode {self.mode}  vision {cfg.vision.method}. "
+            f"Esc or Cmd/Ctrl+Q quits."
         )
 
     def run(self) -> None:
@@ -187,6 +181,8 @@ class Session:
     def _enter_startup_mode(self) -> None:
         # A real webcam measures the TV before play. The fake camera cannot
         # see the stripes, so it skips straight to the game.
+        if self.mode == Mode.POSE:
+            self.mode = Mode.PLAY
         if self.cfg.fake_camera:
             if self.mode == Mode.GEOMETRY:
                 self.mode = Mode.PLAY
@@ -197,13 +193,10 @@ class Session:
         ):
             self._begin_geometry()
             return
-        if self.mode == Mode.PLAY and self.geometry is not None:
-            self.return_mode = Mode.PLAY
-            self.mode = Mode.POSE
         self._maybe_need_background()
 
     def _maybe_need_background(self) -> None:
-        if self.mode not in (Mode.PLAY, Mode.POSE, Mode.OVERLAY):
+        if self.mode not in (Mode.PLAY, Mode.OVERLAY):
             return
         if self.backend.needs_calibration and not self.backend.has_background:
             print("[liveplay] no empty-table snapshot yet. Entering calibration.")
@@ -250,9 +243,6 @@ class Session:
             self._tick_geometry(raw)
         elif self.mode == Mode.CALIBRATE:
             self._tick_calibrate(raw)
-        elif self.mode == Mode.POSE:
-            _points, poses = self._detect(raw)
-            self._draw_stage(poses, instructions=True)
         elif self.mode == Mode.PASSTHROUGH:
             blit_bgr(self.screen, self.source.map_to_screen(raw))
             draw_alignment_guides(self.screen)
@@ -266,14 +256,23 @@ class Session:
             draw_alignment_guides(self.screen)
             self._draw_warning()
         elif self.mode == Mode.PLAY:
-            points, poses = self._detect(raw)
-            self.particles.update(points, self.dt)
+            points, _poses = self._detect(raw)
+            field = self._field_rect()
+            self.soccer.update(points, field, self.dt)
             # Flat gray, only inside the rectangle the TV actually shows.
-            # A picture here would be seen by the camera and tracked as a hand.
-            self._draw_stage(poses if self.show_poses else [], instructions=False)
-            self.particles.draw(self.screen, self.cfg.calibration.gray)
+            # Goals and the ball are not skin-colored, so the camera does
+            # not track them as hands. See liveplay/soccer.py.
+            clip = self._paint_field()
+            self.screen.set_clip(clip)
+            self.soccer.draw(self.screen, self.cfg.calibration.gray)
         else:
             raise ConfigError(f"Unknown mode {self.mode!r}.")
+
+    def _field_rect(self) -> tuple[int, int, int, int]:
+        geometry = self.geometry
+        if geometry is None or geometry.direct_screen:
+            return (0, 0, self.screen.get_width(), self.screen.get_height())
+        return geometry.visible
 
     def _paint_field(self):
         """Gray where the TV can light a pixel. Returns that rectangle, if known."""
@@ -284,26 +283,6 @@ class Session:
             return None
         fill_visible(self.screen, geometry.visible, gray)
         return geometry.visible
-
-    def _draw_stage(self, poses, instructions: bool) -> None:
-        gray = self.cfg.calibration.gray
-        clip = self._paint_field()
-        if instructions and clip is not None:
-            draw_visible_border(self.screen, clip)
-        self.screen.set_clip(clip)
-        if instructions:
-            # The label sits on the bottom edge. Poses are drawn after it
-            # so a hand there still shows through the words.
-            box = clip
-            if box is None:
-                box = (0, 0, self.screen.get_width(), self.screen.get_height())
-            draw_caption(
-                self.screen,
-                "Space starts the game.  G measures the TV again.",
-                box,
-                gray,
-            )
-        draw_poses(self.screen, poses)
 
     def _draw_inset_message(self, message: str) -> None:
         if self.geometry is None:
@@ -361,7 +340,7 @@ class Session:
         # from before the scan is a different mapping, even when the pixel
         # size happens to match.
         self.backend.set_background(None)
-        self.return_mode = Mode.POSE
+        self.return_mode = Mode.PLAY
         self.mode = Mode.CALIBRATE
         print("[liveplay] TV area measured. Clear the table, then press SPACE.")
 
@@ -393,7 +372,7 @@ class Session:
             raise
         self.backend.set_background(frame)
         self.tracker.reset()
-        self.particles.clear()
+        self.soccer.kickoff()
         self.arm_until = None
         height, width = frame.shape[:2]
         print(f"[liveplay] saved calibration {path} ({width}x{height})")
@@ -477,16 +456,8 @@ class Session:
                 print("[liveplay] the fake camera cannot see the TV. Skipping the scan.")
                 return
             self._begin_geometry()
-        elif key == pg.K_h and self.mode == Mode.PLAY:
-            self.show_poses = not self.show_poses
-            print(f"[liveplay] hand pose {'on' if self.show_poses else 'off'}")
         elif key == pg.K_c:
             self._set_mode(Mode.CALIBRATE)
-        elif key == pg.K_SPACE and self.mode == Mode.POSE:
-            self.mode = Mode.PLAY
-            self.tracker.reset()
-            self.particles.clear()
-            print("[liveplay] mode play")
         elif key == pg.K_SPACE and self.mode == Mode.GEOMETRY and self.scan is not None and self.scan.error:
             self._begin_geometry()
         elif key == pg.K_SPACE and self.mode == Mode.CALIBRATE and self.arm_until is None:
@@ -505,10 +476,10 @@ class Session:
             self.arm_until = None
             print("[liveplay] calibration. Clear the table, then press SPACE.")
         if mode == Mode.PLAY:
-            self.particles.clear()
             if self.geometry is None and not self.cfg.fake_camera:
                 self._begin_geometry()
                 return
+            self.soccer.kickoff()
         self.tracker.reset()
         self.mode = mode
         print(f"[liveplay] mode {self.mode}")

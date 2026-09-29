@@ -265,6 +265,54 @@ def draw_caption(
     _blit_bgr_at(surface, image, (pos_x, pos_y))
 
 
+def draw_score(
+    surface: pygame.Surface,
+    left: int,
+    right: int,
+    box: tuple[int, int, int, int],
+    left_color: tuple[int, int, int],
+    right_color: tuple[int, int, int],
+    gray: int = 90,
+) -> None:
+    """Left score, a dash, and right score, centered on the top edge of `box`."""
+    x, y, width, height = (int(v) for v in box)
+    if width < 8 or height < 8:
+        return
+    scale = max(1.3, min(3.2, height / 360.0))
+    thickness = 3 if scale >= 2.0 else 2
+    left_text = str(int(left))
+    right_text = str(int(right))
+    dash = "-"
+    gap = max(10, int(16 * scale))
+    left_w = _text_width(left_text, scale, thickness)
+    dash_w = _text_width(dash, scale, thickness)
+    right_w = _text_width(right_text, scale, thickness)
+    line_h, baseline = _line_metrics(scale, thickness)
+    pad = 6
+    image_w = pad * 2 + left_w + gap + dash_w + gap + right_w
+    image_h = pad * 2 + line_h + baseline
+    image = np.full((image_h, image_w, 3), gray, dtype=np.uint8)
+    cursor_y = pad + line_h
+    cursor_x = pad
+    cv2.putText(
+        image, left_text, (cursor_x, cursor_y), _FONT, scale,
+        (left_color[2], left_color[1], left_color[0]), thickness, cv2.LINE_AA,
+    )
+    cursor_x += left_w + gap
+    cv2.putText(
+        image, dash, (cursor_x, cursor_y), _FONT, scale,
+        (245, 245, 245), thickness, cv2.LINE_AA,
+    )
+    cursor_x += dash_w + gap
+    cv2.putText(
+        image, right_text, (cursor_x, cursor_y), _FONT, scale,
+        (right_color[2], right_color[1], right_color[0]), thickness, cv2.LINE_AA,
+    )
+    pos_x = x + max(0, (width - image_w) // 2)
+    pos_y = y + max(6, int(height * 0.015))
+    _blit_bgr_at(surface, image, (pos_x, pos_y))
+
+
 def draw_points(surface: pygame.Surface, points: list[InteractionPoint]) -> None:
     for point in points:
         color = (255, 210, 70) if point.is_new else (80, 255, 140)
