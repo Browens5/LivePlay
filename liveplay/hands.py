@@ -17,6 +17,13 @@ which is the only format that helper accepts. `vision.scale` (default
 0.5) shrinks the frame first. Landmarks come back in 0..1, then are
 multiplied by the full frame size, so the point stays in screen pixels.
 
+The Mac GPU path also leaks about three BGRA surfaces per frame
+(mediapipe#5267). After a few minutes `CVPixelBufferCreate` fails with
+-6662 and the check abort()s the process. Rebuilding the landmarker
+drops that texture cache. The long side of a Mac frame is capped first,
+because the leaked surfaces are the size of the input and the model
+scales the picture down internally anyway.
+
 Video mode keeps a hand identity across frames. The timestamp passed in
 must increase every call. A cyan puck is a disc, not a hand, so the model
 should not track the drawing. The color blobs in vision.py are the fallback
@@ -27,6 +34,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -49,6 +57,14 @@ HAND_MODEL_URL = (
 
 # Wrist, index MCP, middle MCP, ring MCP, pinky MCP.
 _PALM = (0, 5, 9, 13, 17)
+
+# Three BGRA buffers per Mac GPU frame. Measured against a 1280×720
+# hand landmarker: about 10.6 MB, which is 12 bytes of footprint per
+# input pixel. 512 MiB is well short of the allocation failure.
+_METAL_LEAK_BYTES_PER_PIXEL = 12
+_METAL_LEAK_BUDGET = 512 * 1024 * 1024
+_METAL_LONG_SIDE = 640
+_METAL_REFRESH_S = 10.0
 
 
 class HandDetector(Protocol):
@@ -153,15 +169,26 @@ def open_landmarker(cfg: VisionConfig) -> HandDetector:
             "or run with --vision diff+skin."
         ) from exc
     metal = uses_metal(sys.platform)
+    model = path.read_bytes()
+    try:
+        landmarker = _open_hand_landmarker(mp_python, vision, model, cfg, metal)
+    except Exception as exc:
+        raise LivePlayError(f"Could not open the hand model at {path}: {exc}") from exc
+    return _MediaPipeDetector(
+        mp,
+        landmarker,
+        metal=metal,
+        reopen=lambda: _open_hand_landmarker(mp_python, vision, model, cfg, metal),
+    )
+
+
+def _open_hand_landmarker(mp_python, vision, model: bytes, cfg: VisionConfig, metal: bool):
     delegate = (
         mp_python.BaseOptions.Delegate.GPU
         if metal
         else mp_python.BaseOptions.Delegate.CPU
     )
-    base = mp_python.BaseOptions(
-        model_asset_path=str(path),
-        delegate=delegate,
-    )
+    base = mp_python.BaseOptions(model_asset_buffer=model, delegate=delegate)
     options = vision.HandLandmarkerOptions(
         base_options=base,
         running_mode=vision.RunningMode.VIDEO,
@@ -170,11 +197,32 @@ def open_landmarker(cfg: VisionConfig) -> HandDetector:
         min_hand_presence_confidence=float(cfg.min_confidence),
         min_tracking_confidence=float(cfg.min_confidence),
     )
-    try:
-        landmarker = vision.HandLandmarker.create_from_options(options)
-    except Exception as exc:
-        raise LivePlayError(f"Could not open the hand model at {path}: {exc}") from exc
-    return _MediaPipeDetector(mp, landmarker, metal=metal)
+    return vision.HandLandmarker.create_from_options(options)
+
+
+def metal_frame_budget(width: int, height: int) -> int:
+    """How many Mac GPU frames to run before rebuilding the landmarker."""
+    leaked = max(1, int(width) * int(height) * _METAL_LEAK_BYTES_PER_PIXEL)
+    frames = _METAL_LEAK_BUDGET // leaked
+    return max(12, min(int(frames), 300))
+
+
+def limit_metal_frame(frame_bgr: np.ndarray, long_side: int = _METAL_LONG_SIDE) -> np.ndarray:
+    """Shrink a Mac frame so the leaked surfaces stay small.
+
+    Landmarks are normalized, so a smaller input does not change the
+    pixel the games follow. The model resizes again internally.
+    """
+    height, width = int(frame_bgr.shape[0]), int(frame_bgr.shape[1])
+    longest = max(height, width)
+    if longest <= long_side or longest <= 0:
+        return frame_bgr
+    scale = long_side / longest
+    sized = (
+        max(1, int(round(width * scale))),
+        max(1, int(round(height * scale))),
+    )
+    return cv2.resize(frame_bgr, sized, interpolation=cv2.INTER_AREA)
 
 
 def uses_metal(platform: str) -> bool:
@@ -202,23 +250,87 @@ def pack_frame(frame_bgr: np.ndarray, metal: bool) -> np.ndarray:
 
 
 class _MediaPipeDetector:
-    def __init__(self, mp, landmarker, metal: bool) -> None:
+    def __init__(
+        self,
+        mp,
+        landmarker,
+        metal: bool,
+        reopen,
+        frame_budget=metal_frame_budget,
+        refresh_s: float = _METAL_REFRESH_S,
+    ) -> None:
         self._mp = mp
         self._landmarker = landmarker
         self._metal = metal
+        self._reopen = reopen
+        self._frame_budget = frame_budget
+        self._refresh_s = refresh_s
+        self._served = 0
+        self._opened_at = time.monotonic()
+        self._warned = False
 
     def detect(self, frame_bgr: np.ndarray, timestamp_ms: int) -> list:
-        pixels = pack_frame(frame_bgr, self._metal)
+        frame = limit_metal_frame(frame_bgr) if self._metal else frame_bgr
+        self._maybe_refresh(frame)
+        pixels = pack_frame(frame, self._metal)
         image_format = self._mp.ImageFormat.SRGBA if self._metal else self._mp.ImageFormat.SRGB
         image = self._mp.Image(image_format=image_format, data=pixels)
-        result = self._landmarker.detect_for_video(image, int(timestamp_ms))
-        landmarks = result.hand_landmarks
-        if not landmarks:
-            return []
-        return list(landmarks)
+        result = None
+        try:
+            result = self._landmarker.detect_for_video(image, int(timestamp_ms))
+            landmarks = getattr(result, "hand_landmarks", None)
+            return _copy_hands(landmarks)
+        finally:
+            # Drop the packet before the next frame. On a Mac the texture
+            # cache still keeps the surface until `_maybe_refresh` rebuilds
+            # the landmarker.
+            del result
+            del image
+            self._served += 1
 
     def close(self) -> None:
         self._landmarker.close()
+
+    def _maybe_refresh(self, frame: np.ndarray) -> None:
+        if not self._metal or self._served <= 0:
+            return
+        height, width = int(frame.shape[0]), int(frame.shape[1])
+        budget = self._frame_budget(width, height)
+        aged = (time.monotonic() - self._opened_at) >= self._refresh_s
+        if self._served < budget and not aged:
+            return
+        try:
+            fresh = self._reopen()
+        except Exception as exc:
+            # Keep the current graph. The next frame tries again. One
+            # failed rebuild must not turn into a frame with no tracker.
+            if not self._warned:
+                print(f"[liveplay] could not refresh the hand tracker ({exc}).")
+                self._warned = True
+            return
+        old = self._landmarker
+        self._landmarker = fresh
+        self._served = 0
+        self._opened_at = time.monotonic()
+        self._warned = False
+        try:
+            old.close()
+        except Exception:
+            pass
+
+
+def _copy_hands(landmarks) -> list:
+    """Plain coordinates, so the MediaPipe packet can be released now."""
+    if not landmarks:
+        return []
+    hands = []
+    for hand in landmarks:
+        copied = []
+        for landmark in hand:
+            x, y = _xy(landmark)
+            copied.append((x, y))
+        hands.append(copied)
+    return hands
 
 
 def _xy(landmark) -> tuple[float, float]:
