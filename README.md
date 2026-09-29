@@ -2,10 +2,11 @@
 
 A table that plays with the hands on the glass. A television lies under a sheet of plexiglass, a webcam looks down at it, and one Python process draws the game. Nothing is uploaded. There is no account, and the program does not open a network connection while it runs.
 
-Two games share that camera:
+Three games share that camera:
 
 - **Soccer.** A puck sits on each palm and knocks a ball into the other goal.
 - **Forest.** A dinosaur walks through the trees after the nearest hand, and plays at the waterfall, the lake, the rock, the mountain, and the flowers.
+- **Flight.** Two pterodactyls sit on two hands and swoop through gaps in the branches. Press **5**. The first to 100 points gets confetti.
 
 ![How the table is wired](docs/system.svg)
 
@@ -13,9 +14,9 @@ Two games share that camera:
 
 The webcam is requested at 1280×720. The picture is cropped so it lines up with the television, then warped into the rectangle the panel actually lights. Many sets crop an HDMI image. The first launch on a real webcam paints gray-code stripes and reads them back, so later frames are drawn only on the glass. Press **G** to measure again. The result is stored in `calib/display_geometry.json`.
 
-Each hand becomes a point: an x, a y, and a size, in screen pixels. Both games follow those points. They do not open the camera themselves.
+Each hand becomes a point: an x, a y, and a size, in screen pixels. The games follow those points. They do not open the camera themselves.
 
-The tracker is MediaPipe’s Hand Landmarker. The model file ships with the repo at `models/hand_landmarker.task`, and the app does not download it. Linux runs it on the CPU. A Mac starts MediaPipe’s Metal helper, because that build aborts if the helper is left off. If MediaPipe will not install, soccer can use a color tracker instead (`--vision diff+skin`). The forest cannot: the painting would look like one large hand.
+The tracker is MediaPipe’s Hand Landmarker. The model file ships with the repo at `models/hand_landmarker.task`, and the app does not download it. Linux runs it on the CPU. A Mac starts MediaPipe’s Metal helper, because that build aborts if the helper is left off. If MediaPipe will not install, soccer can use a color tracker instead (`--vision diff+skin`). The forest and the flight cannot: the painting would look like one large hand.
 
 ## The camera is looking at the screen
 
@@ -25,7 +26,9 @@ The next camera frame includes the hands and the picture that was just drawn. Th
 
 Soccer stays a flat gray, the same gray as an empty table. The color tracker subtracts a snapshot of that gray and keeps a blob only when it is also skin-colored. The goals, the ball, the score, and the cyan puck miss that test. The puck is a disc, so the hand model does not treat it as another hand.
 
-The forest is a full picture. Color subtraction compares it with the gray snapshot and reports the whole scene. That mode uses MediaPipe, which is looking for a hand shape. Fingers spread a little help: the camera sees the back of the hand, and a flat fist is easy to miss.
+The forest and the flight are full pictures. Color subtraction compares either one with the gray snapshot and reports the whole scene. Those modes use MediaPipe, which is looking for a hand shape. Fingers spread a little help: the camera sees the back of the hand, and a flat fist is easy to miss.
+
+Flight keeps the glass in blues and greens. The pterodactyl is smaller than the hand, and the wing is one membrane, so the fingertips stay visible around the palm. A limb that touches the body freezes that player for five seconds. Hover the reset control at the top left for three seconds to start over.
 
 Reflections on the plexiglass still fool the color tracker. Dim the room if the pucks wander. The hand model is much less interested in a glare spot.
 
@@ -54,7 +57,7 @@ The first launch measures the television and starts soccer. Later launches reuse
 
 | Key | Action |
 | --- | --- |
-| 1 / 2 / 3 / 4 | Camera view, tracking circles, soccer, forest |
+| 1 / 2 / 3 / 4 / 5 | Camera view, tracking circles, soccer, forest, flight |
 | G | Measure the television again |
 | C, then Space | Snapshot an empty table for the color tracker |
 | Arrows, Shift+arrows, S | Move, resize, and save the camera crop (views 1 and 2) |
@@ -64,6 +67,7 @@ Turn off the television’s motion smoothing, and turn off overscan if the set h
 
 ```bash
 python -m liveplay --mode forest
+python -m liveplay --mode flight
 python -m liveplay --display 1
 python -m liveplay --vision diff+skin   # soccer only, when MediaPipe is missing
 python -m liveplay --windowed           # setup on the computer's own screen
@@ -92,5 +96,7 @@ liveplay/hands.py            MediaPipe palm centers
 liveplay/vision.py           color-blob fallback
 liveplay/soccer.py           ball, pucks, and goals
 liveplay/forest.py           the dinosaur and the forest
+liveplay/flight.py           pterodactyls, branches, and confetti
+liveplay/assets/flight_sky.png   scrolling sky for the flight
 liveplay/display.py          the table window
 ```

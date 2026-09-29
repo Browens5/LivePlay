@@ -5,13 +5,14 @@ Modes
 geometry     Gray-code scan. Finds the framebuffer rectangle the TV shows.
 play         Soccer. A puck follows each hand and knocks the ball.
 forest       A dinosaur walks through the trees, following a hand.
+flight       Two pterodactyls follow two hands through the branches.
 calibrate    Flat gray. SPACE snapshots the empty table.
 passthrough  Camera mapped onto the TV, with corner ticks.
 overlay      Live feed plus blob circles.
 
 Adult keys (keyboard on the Mac, nothing drawn for kids to tap):
   Esc or Cmd/Ctrl+Q   quit
-  1 / 2 / 3 / 4       passthrough / overlay / play / forest
+  1 / 2 / 3 / 4 / 5   passthrough / overlay / play / forest / flight
   C                   empty-table snapshot
   G                   measure the TV again
   Space               snapshot, or retry a failed scan
@@ -43,6 +44,7 @@ from liveplay.display import (
 )
 from liveplay.geometry import DisplayGeometry, DisplayScan, load_geometry, save_geometry
 from liveplay.errors import CalibrationError, CaptureError, ConfigError, LivePlayError
+from liveplay.flight import FlightGame
 from liveplay.forest import ForestGame
 from liveplay.points import PointTracker
 from liveplay.soccer import SoccerGame
@@ -59,8 +61,13 @@ class Mode:
     OVERLAY = "overlay"
     PLAY = "play"
     FOREST = "forest"
+    FLIGHT = "flight"
     CALIBRATE = "calibrate"
     GEOMETRY = "geometry"
+
+
+# Modes that paint a game on the glass and need the measured TV rectangle.
+_GAME_MODES = (Mode.PLAY, Mode.FOREST, Mode.FLIGHT)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -146,6 +153,7 @@ class Session:
         self.tracker = PointTracker(cfg.vision.match_distance, cfg.vision.smoothing)
         self.soccer = SoccerGame()
         self.forest = ForestGame()
+        self.flight = FlightGame()
         self._enter_startup_mode()
         print(
             f"[liveplay] mode {self.mode}  vision {cfg.vision.method}. "
@@ -193,16 +201,16 @@ class Session:
             self._maybe_need_background()
             return
         if self.mode == Mode.GEOMETRY or (
-            self.mode in (Mode.PLAY, Mode.FOREST) and self.geometry is None
+            self.mode in _GAME_MODES and self.geometry is None
         ):
-            if self.mode in (Mode.PLAY, Mode.FOREST):
+            if self.mode in _GAME_MODES:
                 self.return_mode = self.mode
             self._begin_geometry()
             return
         self._maybe_need_background()
 
     def _maybe_need_background(self) -> None:
-        if self.mode not in (Mode.PLAY, Mode.FOREST, Mode.OVERLAY):
+        if self.mode not in (Mode.PLAY, Mode.FOREST, Mode.FLIGHT, Mode.OVERLAY):
             return
         if self.backend.needs_calibration and not self.backend.has_background:
             print("[liveplay] no empty-table snapshot yet. Entering calibration.")
@@ -282,6 +290,17 @@ class Session:
             clip = self._paint_field()
             self.screen.set_clip(clip)
             self.forest.draw(self.screen)
+        elif self.mode == Mode.FLIGHT:
+            points = self._detect(raw)
+            field = self._field_rect()
+            self.flight.update(points, field, self.dt)
+            # A painted sky. MediaPipe still looks for a hand shape. The
+            # pterodactyl stays smaller than the hand, in cool colors.
+            # diff+skin would see the whole picture as a hand.
+            # See liveplay/flight.py.
+            clip = self._paint_field()
+            self.screen.set_clip(clip)
+            self.flight.draw(self.screen)
         else:
             raise ConfigError(f"Unknown mode {self.mode!r}.")
 
@@ -357,7 +376,7 @@ class Session:
         # from before the scan is a different mapping, even when the pixel
         # size happens to match.
         self.backend.set_background(None)
-        if self.return_mode not in (Mode.PLAY, Mode.FOREST):
+        if self.return_mode not in _GAME_MODES:
             self.return_mode = Mode.PLAY
         # MediaPipe does not need the empty-table photo. The color tracker
         # does, and the old photo is the wrong warp, so it has to be retaken.
@@ -475,11 +494,13 @@ class Session:
             self._set_mode(Mode.PLAY)
         elif key == pg.K_4:
             self._set_mode(Mode.FOREST)
+        elif key == pg.K_5:
+            self._set_mode(Mode.FLIGHT)
         elif key == pg.K_g:
             if self.cfg.fake_camera:
                 print("[liveplay] the fake camera cannot see the TV. Skipping the scan.")
                 return
-            if self.mode in (Mode.PLAY, Mode.FOREST):
+            if self.mode in _GAME_MODES:
                 self.return_mode = self.mode
             else:
                 self.return_mode = Mode.PLAY
@@ -503,13 +524,15 @@ class Session:
             self.return_mode = self.mode if self.mode != Mode.CALIBRATE else Mode.PLAY
             self.arm_until = None
             print("[liveplay] calibration. Clear the table, then press SPACE.")
-        if mode in (Mode.PLAY, Mode.FOREST):
+        if mode in _GAME_MODES:
             if self.geometry is None and not self.cfg.fake_camera:
                 self.return_mode = mode
                 self._begin_geometry()
                 return
             if mode == Mode.PLAY:
                 self.soccer.kickoff()
+            elif mode == Mode.FLIGHT:
+                self.flight.reset()
         self.tracker.reset()
         self.mode = mode
         print(f"[liveplay] mode {self.mode}")
