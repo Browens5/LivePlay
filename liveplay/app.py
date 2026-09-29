@@ -1,16 +1,17 @@
-"""One process: capture → vision → points → soccer → the table TV.
+"""One process: capture → vision → points → a game → the table TV.
 
 Modes
 -----
 geometry     Gray-code scan. Finds the framebuffer rectangle the TV shows.
 play         Soccer. A puck follows each hand and knocks the ball.
+forest       A dinosaur walks through the trees, following a hand.
 calibrate    Flat gray. SPACE snapshots the empty table.
 passthrough  Camera mapped onto the TV, with corner ticks.
 overlay      Live feed plus blob circles.
 
 Adult keys (keyboard on the Mac, nothing drawn for kids to tap):
   Esc or Cmd/Ctrl+Q   quit
-  1 / 2 / 3           passthrough / overlay / play
+  1 / 2 / 3 / 4       passthrough / overlay / play / forest
   C                   empty-table snapshot
   G                   measure the TV again
   Space               snapshot, or retry a failed scan
@@ -42,6 +43,7 @@ from liveplay.display import (
 )
 from liveplay.geometry import DisplayGeometry, DisplayScan, load_geometry, save_geometry
 from liveplay.errors import CalibrationError, CaptureError, ConfigError, LivePlayError
+from liveplay.forest import ForestGame
 from liveplay.points import PointTracker
 from liveplay.soccer import SoccerGame
 from liveplay.vision import make_backend
@@ -56,6 +58,7 @@ class Mode:
     PASSTHROUGH = "passthrough"
     OVERLAY = "overlay"
     PLAY = "play"
+    FOREST = "forest"
     CALIBRATE = "calibrate"
     GEOMETRY = "geometry"
     POSE = "pose"
@@ -143,6 +146,7 @@ class Session:
         self.backend = make_backend(cfg.vision, background)
         self.tracker = PointTracker(cfg.vision.match_distance, cfg.vision.smoothing)
         self.soccer = SoccerGame()
+        self.forest = ForestGame()
         self._enter_startup_mode()
         print(
             f"[liveplay] mode {self.mode}  vision {cfg.vision.method}. "
@@ -192,14 +196,16 @@ class Session:
             self._maybe_need_background()
             return
         if self.mode == Mode.GEOMETRY or (
-            self.mode == Mode.PLAY and self.geometry is None
+            self.mode in (Mode.PLAY, Mode.FOREST) and self.geometry is None
         ):
+            if self.mode in (Mode.PLAY, Mode.FOREST):
+                self.return_mode = self.mode
             self._begin_geometry()
             return
         self._maybe_need_background()
 
     def _maybe_need_background(self) -> None:
-        if self.mode not in (Mode.PLAY, Mode.OVERLAY):
+        if self.mode not in (Mode.PLAY, Mode.FOREST, Mode.OVERLAY):
             return
         if self.backend.needs_calibration and not self.backend.has_background:
             print("[liveplay] no empty-table snapshot yet. Entering calibration.")
@@ -269,6 +275,16 @@ class Session:
             clip = self._paint_field()
             self.screen.set_clip(clip)
             self.soccer.draw(self.screen, self.cfg.calibration.gray)
+        elif self.mode == Mode.FOREST:
+            points, _poses = self._detect(raw)
+            field = self._field_rect()
+            self.forest.update(points, field, self.dt)
+            # The picture fills the glass. MediaPipe still looks for a hand
+            # shape. diff+skin would see the whole forest as a hand.
+            # See liveplay/forest.py.
+            clip = self._paint_field()
+            self.screen.set_clip(clip)
+            self.forest.draw(self.screen)
         else:
             raise ConfigError(f"Unknown mode {self.mode!r}.")
 
@@ -344,7 +360,8 @@ class Session:
         # from before the scan is a different mapping, even when the pixel
         # size happens to match.
         self.backend.set_background(None)
-        self.return_mode = Mode.PLAY
+        if self.return_mode not in (Mode.PLAY, Mode.FOREST):
+            self.return_mode = Mode.PLAY
         self.mode = Mode.CALIBRATE
         print("[liveplay] TV area measured. Clear the table, then press SPACE.")
 
@@ -455,10 +472,16 @@ class Session:
             self._set_mode(Mode.OVERLAY)
         elif key == pg.K_3:
             self._set_mode(Mode.PLAY)
+        elif key == pg.K_4:
+            self._set_mode(Mode.FOREST)
         elif key == pg.K_g:
             if self.cfg.fake_camera:
                 print("[liveplay] the fake camera cannot see the TV. Skipping the scan.")
                 return
+            if self.mode in (Mode.PLAY, Mode.FOREST):
+                self.return_mode = self.mode
+            else:
+                self.return_mode = Mode.PLAY
             self._begin_geometry()
         elif key == pg.K_c:
             self._set_mode(Mode.CALIBRATE)
@@ -479,11 +502,13 @@ class Session:
             self.return_mode = self.mode if self.mode != Mode.CALIBRATE else Mode.PLAY
             self.arm_until = None
             print("[liveplay] calibration. Clear the table, then press SPACE.")
-        if mode == Mode.PLAY:
+        if mode in (Mode.PLAY, Mode.FOREST):
             if self.geometry is None and not self.cfg.fake_camera:
+                self.return_mode = mode
                 self._begin_geometry()
                 return
-            self.soccer.kickoff()
+            if mode == Mode.PLAY:
+                self.soccer.kickoff()
         self.tracker.reset()
         self.mode = mode
         print(f"[liveplay] mode {self.mode}")

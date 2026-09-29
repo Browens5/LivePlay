@@ -14,7 +14,7 @@ from pathlib import Path
 
 from liveplay.errors import ConfigError
 
-MODES = ("passthrough", "overlay", "play", "calibrate", "geometry", "pose")
+MODES = ("passthrough", "overlay", "play", "forest", "calibrate", "geometry", "pose")
 VISION_METHODS = ("mediapipe", "diff", "skin", "diff+skin")
 PARTICLE_STYLES = ("sparks", "blobs", "trails")
 
