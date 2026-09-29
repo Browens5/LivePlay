@@ -1,13 +1,16 @@
 """Two-goal soccer on the table.
 
-Each interaction point is a hand. The ball bounces off the top and bottom
-of the playfield, and off the side walls outside the goals. The center of
-the ball crossing a goal line scores for the player on the other side,
-then the ball sits in the middle for a moment.
+Each interaction point is a hand. A puck sits on that point and is what
+hits the ball. The ball bounces off the top and bottom of the playfield,
+and off the side walls outside the goals. The center of the ball crossing
+a goal line scores for the player on the other side, then the ball sits
+in the middle for a moment. During that pause the puck still follows the
+hand, and it does not move the ball.
 
 The camera is looking at this drawing. The field stays the calibration
-gray. Goals, the ball, and the score are blue, green, or white so they
-miss the skin gate in vision.py and are not tracked as extra hands.
+gray. Goals, the ball, the score, and the puck are blue, green, white, or
+cyan so they miss the skin gate in vision.py. The puck is a disc, not a
+hand shape, so the MediaPipe tracker should not treat it as another hand.
 """
 
 from __future__ import annotations
@@ -26,6 +29,9 @@ GOAL_RIGHT = (50, 220, 120)
 BALL = (248, 248, 248)
 BALL_MARK = (40, 170, 255)
 LINE = (206, 206, 206)
+# Cyan disc and a dark-blue core. Both sit outside the skin hue bands.
+PUCK = (40, 210, 255)
+PUCK_CORE = (8, 40, 120)
 
 _RESTITUTION = 0.96
 _MAX_SPEED = 2200.0
@@ -46,6 +52,8 @@ class SoccerGame:
         self.ball_vx = 0.0
         self.ball_vy = 0.0
         self.ball_radius = 24.0
+        self.puck_radius = 36.0
+        self.pucks: list[tuple[float, float]] = []
         self.hold = 0.0
         self._ready = False
 
@@ -66,6 +74,9 @@ class SoccerGame:
         dt = max(0.0, min(float(dt), 0.05))
         self.field = (int(field[0]), int(field[1]), int(field[2]), int(field[3]))
         self.ball_radius = _ball_radius(self.field)
+        self.puck_radius = _puck_radius(self.field)
+        # The puck is glued to the smoothed hand center. One puck per hand.
+        self.pucks = [(float(point.x), float(point.y)) for point in points]
         if not self._ready:
             self._place_center()
             self._ready = True
@@ -111,6 +122,7 @@ class SoccerGame:
         pygame.draw.line(surface, LINE, (mid_x, y), (mid_x, y + height), 3)
         circle_r = max(12, int(min(width, height) * 0.12))
         pygame.draw.circle(surface, LINE, (mid_x, y + height // 2), circle_r, 3)
+        self._draw_pucks(surface)
         center = (int(self.ball_x), int(self.ball_y))
         radius = max(4, int(self.ball_radius))
         pygame.draw.circle(surface, BALL, center, radius)
@@ -124,6 +136,14 @@ class SoccerGame:
             GOAL_RIGHT,
             gray,
         )
+
+    def _draw_pucks(self, surface: pygame.Surface) -> None:
+        radius = max(4, int(round(self.puck_radius)))
+        core = max(3, radius // 3)
+        for px, py in self.pucks:
+            center = (int(round(px)), int(round(py)))
+            pygame.draw.circle(surface, PUCK, center, radius)
+            pygame.draw.circle(surface, PUCK_CORE, center, core)
 
     def _place_center(self) -> None:
         assert self.field is not None
@@ -186,7 +206,8 @@ class SoccerGame:
             dx = self.ball_x - point.x
             dy = self.ball_y - point.y
             dist = math.hypot(dx, dy)
-            reach = radius + max(8.0, point.size)
+            # The drawn puck is the collider, not the raw blob radius.
+            reach = radius + self.puck_radius
             if dist >= reach:
                 continue
             if dist < 1.0:
@@ -217,6 +238,11 @@ class SoccerGame:
 def _ball_radius(field: tuple[int, int, int, int]) -> float:
     _x, _y, width, height = field
     return max(16.0, min(52.0, 0.04 * min(width, height)))
+
+
+def _puck_radius(field: tuple[int, int, int, int]) -> float:
+    _x, _y, width, height = field
+    return max(28.0, min(80.0, 0.055 * float(min(width, height))))
 
 
 def _goal_depth(width: int) -> int:

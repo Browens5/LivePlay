@@ -11,7 +11,7 @@ import numpy as np
 
 from liveplay.config import VisionConfig
 from liveplay.points import InteractionPoint
-from liveplay.soccer import BALL, GOAL_LEFT, GOAL_RIGHT, SoccerGame
+from liveplay.soccer import BALL, GOAL_LEFT, GOAL_RIGHT, PUCK, PUCK_CORE, SoccerGame
 from liveplay.vision import BlobVision
 
 
@@ -86,10 +86,45 @@ class SoccerRulesTest(unittest.TestCase):
         game.update([hand], FIELD, 1.0 / 60.0)
         self.assertGreater(game.ball_x, 200)
         self.assertGreater(game.ball_vx, 0)
+        self.assertEqual(game.pucks, [(170.0, 100.0)])
+
+    def test_puck_reaches_farther_than_a_tiny_blob(self) -> None:
+        game = _ready()
+        game.ball_x = 200
+        game.ball_y = 100
+        game.ball_vx = 0
+        game.ball_vy = 0
+        hand = InteractionPoint(x=160, y=100, size=1, vx=0, vy=0)
+        game.update([hand], FIELD, 1.0 / 60.0)
+        self.assertEqual(game.pucks, [(160.0, 100.0)])
+        self.assertGreater(game.ball_x, 200)
+        self.assertGreater(game.ball_vx, 0)
+
+    def test_each_hand_gets_a_puck(self) -> None:
+        game = _ready()
+        hands = [
+            InteractionPoint(x=40, y=40, size=10),
+            InteractionPoint(x=300, y=160, size=10),
+        ]
+        game.update(hands, FIELD, 1.0 / 60.0)
+        self.assertEqual(game.pucks, [(40.0, 40.0), (300.0, 160.0)])
+
+    def test_puck_follows_during_a_goal_hold_without_moving_the_ball(self) -> None:
+        game = _ready()
+        game.ball_x = 390
+        game.ball_y = 100
+        game.ball_vx = 800
+        game.update([], FIELD, 0.05)
+        self.assertEqual(game.score_left, 1)
+        hand = InteractionPoint(x=210, y=100, size=30, vx=500, vy=0)
+        game.update([hand], FIELD, 0.05)
+        self.assertAlmostEqual(game.ball_x, 200)
+        self.assertEqual(game.ball_vx, 0)
+        self.assertEqual(game.pucks, [(210.0, 100.0)])
 
     def test_goal_colors_are_not_skin(self) -> None:
-        frame = np.full((80, 240, 3), 90, dtype=np.uint8)
-        for index, rgb in enumerate((GOAL_LEFT, GOAL_RIGHT, BALL)):
+        frame = np.full((80, 400, 3), 90, dtype=np.uint8)
+        for index, rgb in enumerate((GOAL_LEFT, GOAL_RIGHT, BALL, PUCK, PUCK_CORE)):
             bgr = (rgb[2], rgb[1], rgb[0])
             origin = 10 + index * 70
             cv2.rectangle(frame, (origin, 10), (origin + 50, 70), bgr, thickness=-1)
@@ -129,6 +164,24 @@ class SoccerRulesTest(unittest.TestCase):
             self.assertEqual(surface.get_at((392, 100))[:3], GOAL_RIGHT)
             top = [surface.get_at((px, 24))[:3] for px in range(140, 260)]
             self.assertTrue(any(pixel != (90, 90, 90) for pixel in top))
+        finally:
+            pygame.display.quit()
+
+    def test_puck_is_drawn_on_the_hand(self) -> None:
+        import pygame
+
+        pygame.display.init()
+        try:
+            surface = pygame.display.set_mode((400, 200))
+            surface.fill((90, 90, 90))
+            game = _ready()
+            game.update([InteractionPoint(x=80, y=150, size=10)], FIELD, 1.0 / 60.0)
+            game.draw(surface, 90)
+            self.assertEqual(surface.get_at((80, 150))[:3], PUCK_CORE)
+            ring_x = 80 + int(game.puck_radius * 0.65)
+            self.assertEqual(surface.get_at((ring_x, 150))[:3], PUCK)
+            # The ball stays white. The center dot is the mark, so sample the edge.
+            self.assertEqual(surface.get_at((210, 100))[:3], BALL)
         finally:
             pygame.display.quit()
 

@@ -3,7 +3,7 @@
 Modes
 -----
 geometry     Gray-code scan. Finds the framebuffer rectangle the TV shows.
-play         Soccer. Hands bat the ball inside the measured rectangle.
+play         Soccer. A puck follows each hand and knocks the ball.
 calibrate    Flat gray. SPACE snapshots the empty table.
 passthrough  Camera mapped onto the TV, with corner ticks.
 overlay      Live feed plus blob circles.
@@ -44,7 +44,7 @@ from liveplay.geometry import DisplayGeometry, DisplayScan, load_geometry, save_
 from liveplay.errors import CalibrationError, CaptureError, ConfigError, LivePlayError
 from liveplay.points import PointTracker
 from liveplay.soccer import SoccerGame
-from liveplay.vision import BlobVision, make_backend
+from liveplay.vision import make_backend
 
 # How long the screen stays pure gray before we trust the camera frame.
 # The instruction text is itself a bright blob the webcam would memorize.
@@ -91,6 +91,7 @@ def run(cfg: AppConfig) -> int:
         return 1
     screen = None
     source = None
+    session = None
     try:
         screen = create_display(cfg)
         source = open_frame_source(cfg)
@@ -104,6 +105,8 @@ def run(cfg: AppConfig) -> int:
             print(f"[liveplay] error: {exc}", file=sys.stderr)
         return 1
     finally:
+        if session is not None:
+            session.close()
         if source is not None:
             source.close()
         pygame.quit()
@@ -137,7 +140,7 @@ class Session:
             # overscan. Treat its image as already screen-sized.
             self.geometry = DisplayGeometry.full_frame(*frame_size)
         background = self._load_background()
-        self.backend: BlobVision = make_backend(cfg.vision, background)
+        self.backend = make_backend(cfg.vision, background)
         self.tracker = PointTracker(cfg.vision.match_distance, cfg.vision.smoothing)
         self.soccer = SoccerGame()
         self._enter_startup_mode()
@@ -260,8 +263,9 @@ class Session:
             field = self._field_rect()
             self.soccer.update(points, field, self.dt)
             # Flat gray, only inside the rectangle the TV actually shows.
-            # Goals and the ball are not skin-colored, so the camera does
-            # not track them as hands. See liveplay/soccer.py.
+            # The puck is a cyan disc on the hand center. Goals, the ball,
+            # and that disc miss the skin gate, and the disc is not a hand
+            # shape. See liveplay/soccer.py and liveplay/hands.py.
             clip = self._paint_field()
             self.screen.set_clip(clip)
             self.soccer.draw(self.screen, self.cfg.calibration.gray)
@@ -514,6 +518,11 @@ class Session:
         camera.roi = nudge_roi(camera.roi, raw_size[0], raw_size[1], dx, dy, dw, dh)
         self.cfg.roi = camera.roi
         print(f"[liveplay] roi x={camera.roi[0]} y={camera.roi[1]} w={camera.roi[2]} h={camera.roi[3]}")
+
+    def close(self) -> None:
+        closer = getattr(self.backend, "close", None)
+        if closer is not None:
+            closer()
 
     def _maybe_log(self) -> None:
         now = time.perf_counter()
