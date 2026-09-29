@@ -1,8 +1,8 @@
-"""Interaction points shared by vision and the game.
+"""Interaction points shared by vision and the games.
 
 Coordinates are screen pixels on the table display (origin top-left).
-Velocity is pixels per second. A future mode (toy scene fill, a second
-game) should consume this list and not reach into the camera.
+Velocity is pixels per second. Soccer and the forest both consume this
+list. They do not read the camera.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ class InteractionPoint:
 class PointTracker:
     """Nearest-neighbor match across frames so points get velocity.
 
-    Crossing hands can swap identities. That is acceptable for v0 particles.
-    Smoothing damps webcam jitter before the game sees the point.
+    Crossing hands can swap identities. Smoothing damps webcam jitter
+    before a puck or the dinosaur follows the point.
     """
 
     def __init__(
@@ -37,8 +37,8 @@ class PointTracker:
             raise ValueError("match_distance must be positive")
         self.match_distance = match_distance
         self.smoothing = min(1.0, max(0.0, smoothing))
-        # Keep a point briefly if a frame drops it, so one bad frame does
-        # not look like the hand left and came back (a fresh splash).
+        # Keep a point briefly if a frame drops it, so one missed frame
+        # does not look like the hand left and came back.
         self.hold_frames = max(0, hold_frames)
         self._prev: list[tuple[InteractionPoint, int]] = []
 
@@ -77,7 +77,7 @@ class PointTracker:
                 point.vx = 0.0
                 point.vy = 0.0
                 point.is_new = True
-            # A bad dt spike should not fling particles across the table.
+            # A bad dt spike should not fling a puck across the table.
             point.vx = _clamp(point.vx, -4000.0, 4000.0)
             point.vy = _clamp(point.vy, -4000.0, 4000.0)
             updated.append(point)

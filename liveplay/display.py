@@ -1,9 +1,9 @@
 """Fullscreen (or windowed) table display.
 
-The playfield is flat gray on purpose. The overhead camera sees this
-window. A picture, gradient, or bright background would be subtracted as
-a hand. Particles are drawn on top by the game; this module only owns
-the window, alignment guides, and operator messages.
+Soccer paints a flat gray field so the overhead camera is not looking at
+a picture. The forest fills the glass on purpose and relies on the
+hand-shape tracker. This module owns the window, the gray field, the
+score, operator text, and the overlay circles. The games draw themselves.
 """
 
 from __future__ import annotations
@@ -182,87 +182,6 @@ def fill_visible(surface: pygame.Surface, visible: tuple[int, int, int, int], gr
     x, y, width, height = visible
     if width > 0 and height > 0:
         pygame.draw.rect(surface, (gray, gray, gray), (x, y, width, height))
-
-
-def draw_visible_border(surface: pygame.Surface, visible: tuple[int, int, int, int]) -> None:
-    x, y, width, height = visible
-    if width > 1 and height > 1:
-        pygame.draw.rect(surface, (245, 245, 245), (x, y, width, height), 4)
-
-
-# RGB. Chosen so the overhead camera's HSV reading misses the skin bands
-# in vision.py (hue 0–20 and 170–180). Yellow and pink sit on those edges.
-POSE_OUTLINE = (40, 210, 255)
-POSE_PALM = (50, 230, 110)
-POSE_TIP = (90, 150, 255)
-
-
-def draw_poses(surface: pygame.Surface, poses) -> None:
-    """Project a hand outline, palm, and fingertips onto the glass.
-
-    The camera sees this drawing. The colors fail the skin gate, so the
-    pose itself is less likely to be tracked as another hand.
-    """
-    outline = POSE_OUTLINE
-    palm_color = POSE_PALM
-    tip_color = POSE_TIP
-    for pose in poses:
-        palm = (int(pose.x), int(pose.y))
-        if len(pose.contour) >= 3:
-            points = [(int(x), int(y)) for x, y in pose.contour]
-            pygame.draw.lines(surface, outline, True, points, 3)
-        pygame.draw.circle(surface, palm_color, palm, max(10, int(pose.size * 0.35)), 3)
-        for tip_x, tip_y in pose.fingertips:
-            tip = (int(tip_x), int(tip_y))
-            pygame.draw.line(surface, outline, palm, tip, 2)
-            pygame.draw.circle(surface, tip_color, tip, 7)
-
-
-def draw_caption(
-    surface: pygame.Surface,
-    text: str,
-    box: tuple[int, int, int, int] | None = None,
-    gray: int = 90,
-) -> None:
-    """A short line on the bottom edge of `box`. The middle of the glass stays clear.
-
-    The pose check used to paint a full-screen card over the hand outline.
-    This leaves the tracking graphics visible and only labels the bottom edge.
-    """
-    if not text:
-        return
-    if box is None:
-        x, y, width, height = 0, 0, surface.get_width(), surface.get_height()
-    else:
-        x, y, width, height = (int(v) for v in box)
-    if width < 8 or height < 8:
-        return
-    scale, thickness, pad = 0.7, 2, 8
-    max_width = max(40, width - pad * 2)
-    lines = _wrap(text, scale, thickness, max_width)[:2]
-    line_h, baseline = _line_metrics(scale, thickness)
-    step = line_h + baseline + 4
-    text_w = max(_text_width(line or " ", scale, thickness) for line in lines)
-    image_w = min(width, text_w + pad * 2)
-    image_h = min(height, pad * 2 + step * len(lines))
-    image = np.full((image_h, image_w, 3), gray, dtype=np.uint8)
-    cursor = pad + line_h
-    for line in lines:
-        if line:
-            cv2.putText(
-                image,
-                line,
-                (pad, cursor),
-                _FONT,
-                scale,
-                (245, 245, 245),
-                thickness,
-                cv2.LINE_AA,
-            )
-        cursor += step
-    pos_x = int(x) + max(0, (width - image_w) // 2)
-    pos_y = int(y) + max(0, height - image_h - 6)
-    _blit_bgr_at(surface, image, (pos_x, pos_y))
 
 
 def draw_score(

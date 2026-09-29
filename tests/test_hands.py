@@ -87,7 +87,6 @@ class HandVisionTest(unittest.TestCase):
         self.assertAlmostEqual(points[0].x, 50.0)
         self.assertAlmostEqual(points[1].x, 150.0)
         self.assertFalse(backend.needs_calibration)
-        self.assertEqual(backend.last_poses, [])
 
     def test_scale_shrinks_the_image_and_keeps_screen_pixels(self) -> None:
         fake = _Fake([_hand((0.5, 0.5))])

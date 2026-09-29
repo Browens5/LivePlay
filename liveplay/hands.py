@@ -65,7 +65,6 @@ class HandVision:
     def __init__(self, cfg: VisionConfig, detector: HandDetector | None = None) -> None:
         self.cfg = cfg
         self.last_warning: str | None = None
-        self.last_poses: list = []
         self._stamp = 0
         self._detector = detector if detector is not None else open_landmarker(cfg)
 
@@ -87,7 +86,6 @@ class HandVision:
 
     def detect(self, frame_bgr: np.ndarray) -> list[InteractionPoint]:
         self.last_warning = None
-        self.last_poses = []
         if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             self.last_warning = "Camera frame was not a color image."
             return []

@@ -11,11 +11,10 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import cv2
 import numpy as np
 
-from liveplay.display import draw_caption, draw_poses, draw_visible_border, fill_visible
+from liveplay.display import fill_visible
 from liveplay.errors import CalibrationError
 from liveplay.geometry import (
     DisplayScan,
-    HandPose,
     load_geometry,
     render_pattern,
     save_geometry,
@@ -158,12 +157,8 @@ class DisplayGeometryTest(unittest.TestCase):
         _x, _y, width, height = geometry.visible
         self.assertGreater(width, 400)
         self.assertGreater(height, 200)
-        pose = geometry.apply_pose(
-            HandPose(x=40, y=30, size=12, contour=[(40, 30), (50, 30), (45, 48)], fingertips=[(50, 30)])
-        )
-        self.assertGreater(pose.x, 70)
-        self.assertEqual(len(pose.contour), 3)
-        self.assertEqual(len(pose.fingertips), 1)
+        mapped = geometry.map_xy(np.array([[40.0, 30.0]], dtype=np.float32))
+        self.assertGreater(float(mapped[0, 0]), 70)
 
     def test_unreadable_stripes_are_an_error(self) -> None:
         scan = DisplayScan((200, 120), bits=4, settle=0.0, inset=0)
@@ -199,29 +194,10 @@ class DisplayGeometryTest(unittest.TestCase):
             surface = pygame.display.set_mode((640, 360))
             visible = (80, 50, 480, 260)
             fill_visible(surface, visible, 90)
-            draw_visible_border(surface, visible)
-            surface.set_clip(visible)
-            draw_poses(
-                surface,
-                [
-                    HandPose(
-                        x=300,
-                        y=180,
-                        size=40,
-                        contour=[(260, 150), (340, 150), (320, 220), (250, 210)],
-                        fingertips=[(260, 150), (340, 150)],
-                    )
-                ],
-            )
             self.assertEqual(surface.get_at((4, 4))[:3], (0, 0, 0))
             self.assertEqual(surface.get_at((639, 359))[:3], (0, 0, 0))
-            self.assertNotEqual(surface.get_at((300, 180))[:3], (0, 0, 0))
-            surface.set_clip(None)
-            surface.fill((90, 90, 90))
-            draw_caption(surface, "Space starts the game.", (0, 0, 640, 360), 90)
-            self.assertEqual(surface.get_at((320, 40))[:3], (90, 90, 90))
-            bottom = [surface.get_at((px, 340))[:3] for px in range(80, 560, 8)]
-            self.assertTrue(any(pixel != (90, 90, 90) for pixel in bottom))
+            self.assertEqual(surface.get_at((300, 180))[:3], (90, 90, 90))
+            self.assertEqual(surface.get_at((80, 50))[:3], (90, 90, 90))
         finally:
             pygame.display.quit()
 

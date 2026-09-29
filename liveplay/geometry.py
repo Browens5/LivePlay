@@ -1,8 +1,8 @@
 """Measure which part of the framebuffer the TV actually shows.
 
-Cheap panels overscan. The Mac draws 1920×1080, and the glass only lights
-up a smaller rectangle of that image, so particles drawn at the edge never
-appear. The webcam is looking at the glass, so it can see the difference.
+Cheap panels overscan. The computer draws 1920×1080, and the glass only
+lights a smaller rectangle of that image. The webcam is looking at the
+glass, so it can see the difference.
 
 The scan paints Gray-code stripes (and their inverse) and reads them back
 through the camera. Each camera pixel that lands on the panel gets the
@@ -10,9 +10,10 @@ framebuffer coordinate it is looking at. From that:
 
 * `visible` is the framebuffer rectangle that reaches the glass. It is
   the full span of those coordinates. `inset` can pull it in; the
-  default is 0, so the playfield uses the whole lit area.
-* `homography` maps camera pixels onto that framebuffer. Hand contours
-  go through it, so a pose drawn on the TV sits under the real hand.
+  default is 0, so both games use the whole lit area.
+* `homography` maps camera pixels onto that framebuffer. Vision runs on
+  the warped image, so a hand on the glass lines up with the drawing
+  under it.
 
 A full-white frame cannot measure overscan: the panel is lit either way.
 The codes are what make a camera pixel say "I am seeing framebuffer x=140",
@@ -33,17 +34,6 @@ from liveplay.errors import CalibrationError
 _DARK = 16
 _BRIGHT = 240
 _BIT_MARGIN = 12
-
-
-@dataclass
-class HandPose:
-    """A hand in one coordinate space: camera pixels, or framebuffer pixels."""
-
-    x: float
-    y: float
-    size: float
-    contour: list[tuple[float, float]]
-    fingertips: list[tuple[float, float]]
 
 
 @dataclass
@@ -101,19 +91,6 @@ class DisplayGeometry:
         if x1 > x0 and y1 > y0:
             masked[y0:y1, x0:x1] = warped[y0:y1, x0:x1]
         return masked
-
-    def apply_pose(self, pose: HandPose) -> HandPose:
-        palm = self.map_xy(np.array([[pose.x, pose.y], [pose.x + pose.size, pose.y]]))
-        size = float(np.hypot(palm[1, 0] - palm[0, 0], palm[1, 1] - palm[0, 1]))
-        contour = _pairs(self.map_xy(np.array(pose.contour, dtype=np.float32))) if pose.contour else []
-        tips = _pairs(self.map_xy(np.array(pose.fingertips, dtype=np.float32))) if pose.fingertips else []
-        return HandPose(
-            x=float(palm[0, 0]),
-            y=float(palm[0, 1]),
-            size=max(1.0, size),
-            contour=contour,
-            fingertips=tips,
-        )
 
 
 def render_pattern(
@@ -480,9 +457,3 @@ def _homography(x_map: np.ndarray, y_map: np.ndarray, valid: np.ndarray) -> np.n
             "press SPACE to measure again."
         )
     return homography.astype(np.float64)
-
-
-def _pairs(points: np.ndarray) -> list[tuple[float, float]]:
-    if points.size == 0:
-        return []
-    return [(float(x), float(y)) for x, y in points.reshape(-1, 2)]

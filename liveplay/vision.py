@@ -1,31 +1,31 @@
-"""Local vision. One mapped camera frame in, interaction points out.
+"""Color-blob fallback. One mapped camera frame in, interaction points out.
+
+The default tracker is MediaPipe (`liveplay/hands.py`). This module runs
+when `vision.method` is `diff`, `skin`, or `diff+skin`.
 
 Feedback loop
 -------------
-The webcam looks at the TV, so the picture we draw is part of the scene.
+The webcam looks at the TV, so the picture on the glass is part of the scene.
 
-* Calibration is a flat gray screen with the table empty. The playfield
-  stays that same gray. A gradient, photo, or bright scene would differ
-  from the snapshot everywhere and look like a giant hand.
-* The blob methods detect hands by difference from that snapshot, then
-  gate with a skin-color mask (`diff+skin`). Bright particles fail the
-  skin test, so the game is less likely to chase its own sparks.
-* The pose drawn on the glass (cyan outline, green palm, blue fingertips)
-  is the same idea: those hues are outside the skin bands, so the check
-  image is not a second hand.
-* Small blobs are dropped. Particle specks are smaller than a hand.
-* `track_dark_blobs` is off by default. Turn it on for dark toys. It will
-  also see some shadows and heavy glare edges.
-* Auto exposure still breaks this: if the camera re-meters when particles
-  appear, the gray field no longer matches the snapshot. capture.py tries
-  to pin exposure; many webcams ignore it.
-* Ceiling lights reflecting on the plexiglass show up as bright blobs.
-  Skin gating rejects most of them. A large washed-out reflection can
-  still win. Dim the room or matte the plexi. See the README.
+* `diff` and `diff+skin` need a flat gray snapshot of the empty table.
+  Soccer stays that same gray. A photograph or a bright scene differs
+  from the snapshot everywhere and looks like one giant hand. The forest
+  is that kind of picture, so it needs MediaPipe, not this fallback.
+* `diff+skin` keeps a blob only when it is also skin-colored. The soccer
+  puck, ball, goals, and score miss that test. `diff` alone will track
+  those graphics.
+* `skin` does not need the snapshot. It still mistakes a skin-colored
+  drawing for a hand.
+* Small blobs are dropped (`vision.min_area`).
+* `track_dark_blobs` is off. Turn it on only for dark toys. Shadows and
+  hard glare edges can then count too.
+* Auto exposure still breaks subtraction: if the camera re-meters, the
+  gray field no longer matches the snapshot. capture.py asks for a locked
+  exposure. Many webcams ignore it.
+* Ceiling lights on the plexiglass are bright blobs. The skin gate
+  rejects most of them. A large washed-out reflection can still win.
 
-This module does not know about particles or pygame. Palm centers from
-MediaPipe live in `liveplay/hands.py`. `make_backend` selects that
-backend when `vision.method` is `mediapipe`, and a blob backend otherwise.
+`make_backend` selects MediaPipe when `vision.method` is `mediapipe`.
 """
 
 from __future__ import annotations
@@ -39,7 +39,6 @@ import cv2
 import numpy as np
 
 from liveplay.config import VisionConfig
-from liveplay.geometry import HandPose
 from liveplay.points import InteractionPoint
 
 # OpenCV HSV hue is 0..180. These bands cover typical skin under indoor
@@ -75,7 +74,6 @@ class BlobVision:
         self.background: np.ndarray | None = None
         self._bg_ready: np.ndarray | None = None
         self.last_warning: str | None = None
-        self.last_poses: list[HandPose] = []
         kernel = cfg.morph_kernel
         self._kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel, kernel))
         if background is not None:
@@ -99,7 +97,6 @@ class BlobVision:
 
     def detect(self, frame_bgr: np.ndarray) -> list[InteractionPoint]:
         self.last_warning = None
-        self.last_poses = []
         if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             self.last_warning = "Camera frame was not a color image."
             return []
@@ -172,18 +169,10 @@ class BlobVision:
             cx = float(moments["m10"] / moments["m00"]) / scale
             cy = float(moments["m01"] / moments["m00"]) / scale
             radius = (area / np.pi) ** 0.5 / scale
-            full = np.round(contour.astype(np.float32) / scale).astype(np.int32)
-            if len(full) >= 5:
-                epsilon = 0.012 * cv2.arcLength(full, True)
-                full = cv2.approxPolyDP(full, max(epsilon, 1.0), True)
-            outline = [(float(p[0][0]), float(p[0][1])) for p in full]
-            tips = _fingertips(full, (cx, cy))
-            pose = HandPose(x=cx, y=cy, size=radius, contour=outline, fingertips=tips)
-            found.append((area, InteractionPoint(x=cx, y=cy, size=radius), pose))
+            found.append((area, InteractionPoint(x=cx, y=cy, size=radius)))
         found.sort(key=lambda item: item[0], reverse=True)
         found = found[: self.cfg.max_blobs]
-        self.last_poses = [pose for _, _, pose in found]
-        return [point for _, point, _ in found]
+        return [point for _, point in found]
 
     def close(self) -> None:
         return
@@ -216,39 +205,6 @@ def _skin_mask(frame_bgr: np.ndarray) -> np.ndarray:
     low = cv2.inRange(hsv, _SKIN_LOW_1, _SKIN_HIGH_1)
     high = cv2.inRange(hsv, _SKIN_LOW_2, _SKIN_HIGH_2)
     return cv2.bitwise_or(low, high)
-
-
-def _fingertips(contour: np.ndarray, center: tuple[float, float]) -> list[tuple[float, float]]:
-    """Hull points separated by a deep valley. A fist often has none.
-
-    Depth from OpenCV is in eighths of a pixel (value / 256).
-    """
-    if contour is None or len(contour) < 8:
-        return []
-    hull = cv2.convexHull(contour, returnPoints=False)
-    if hull is None or len(hull) < 4:
-        return []
-    try:
-        defects = cv2.convexityDefects(contour, hull)
-    except cv2.error:
-        return []
-    if defects is None:
-        return []
-    # OpenCV 4 returns (N, 1, 4). Some builds return (N, 4). Both are four ints.
-    rows = np.reshape(np.asarray(defects), (-1, 4))
-    tips: list[tuple[float, float]] = []
-    for row in rows:
-        start, end, _far, depth = int(row[0]), int(row[1]), int(row[2]), int(row[3])
-        if depth / 256.0 < 10.0:
-            continue
-        for index in (start, end):
-            x, y = contour[index, 0]
-            tip = (float(x), float(y))
-            if all((tip[0] - kept[0]) ** 2 + (tip[1] - kept[1]) ** 2 > 14.0 ** 2 for kept in tips):
-                tips.append(tip)
-    cx, cy = center
-    tips.sort(key=lambda tip: -((tip[0] - cx) ** 2 + (tip[1] - cy) ** 2))
-    return tips[:5]
 
 
 def _dark_mask(frame_bgr: np.ndarray, background_bgr: np.ndarray, delta: int) -> np.ndarray:

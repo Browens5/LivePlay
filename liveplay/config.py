@@ -14,9 +14,8 @@ from pathlib import Path
 
 from liveplay.errors import ConfigError
 
-MODES = ("passthrough", "overlay", "play", "forest", "calibrate", "geometry", "pose")
+MODES = ("passthrough", "overlay", "play", "forest", "calibrate", "geometry")
 VISION_METHODS = ("mediapipe", "diff", "skin", "diff+skin")
-PARTICLE_STYLES = ("sparks", "blobs", "trails")
 
 DEFAULTS: dict = {
     "camera": {"index": 0, "width": 1280, "height": 720, "fps": 30},
@@ -46,14 +45,6 @@ DEFAULTS: dict = {
         "hands": 2,
         "min_confidence": 0.5,
         "model": "models/hand_landmarker.task",
-    },
-    "particles": {
-        "style": "sparks",
-        "max_count": 450,
-        "spawn_per_point": 3,
-        "fade_per_second": 0.7,
-        "attract": 900,
-        "splash": 16,
     },
     "geometry": {
         "path": "calib/display_geometry.json",
@@ -122,16 +113,6 @@ class VisionConfig:
 
 
 @dataclass
-class ParticleConfig:
-    style: str
-    max_count: int
-    spawn_per_point: int
-    fade_per_second: float
-    attract: float
-    splash: int
-
-
-@dataclass
 class AppConfig:
     camera: CameraConfig
     roi: tuple[int, int, int, int]
@@ -141,7 +122,6 @@ class AppConfig:
     calibration: CalibrationConfig
     geometry: GeometryConfig
     vision: VisionConfig
-    particles: ParticleConfig
     mode: str
     fake_camera: bool
     frames: int
@@ -166,14 +146,14 @@ class AppConfig:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="liveplay",
-        description="Live Play v0 — local interactive table (no network).",
+        description="Live Play — local table games from an overhead webcam.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
             "  python -m liveplay --list-displays\n"
             "  python -m liveplay --mode passthrough\n"
             "  python -m liveplay --mode play --display 1\n"
-            "  python -m liveplay --camera 0 --particle-style blobs\n"
+            "  python -m liveplay --mode forest\n"
         ),
     )
     parser.add_argument("--config", type=Path, default=Path("config.json"))
@@ -193,7 +173,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fullscreen", action="store_true", help="Force fullscreen.")
     parser.add_argument("--roi", help="Camera crop x,y,w,h. w or h of 0 uses the full frame.")
     parser.add_argument("--calibration", type=Path, help="Empty-table snapshot path.")
-    parser.add_argument("--particle-style", choices=PARTICLE_STYLES)
     parser.add_argument("--vision", choices=VISION_METHODS)
     parser.add_argument(
         "--fake-camera",
@@ -264,8 +243,6 @@ def _apply_cli(cfg: AppConfig, args: argparse.Namespace) -> None:
                 base = Path(".")
             cal_path = base / cal_path
         cfg.calibration.path = cal_path
-    if args.particle_style is not None:
-        cfg.particles.style = args.particle_style
     if args.vision is not None:
         cfg.vision.method = args.vision
     cfg.fake_camera = bool(args.fake_camera)
@@ -281,7 +258,6 @@ def _from_raw(raw: dict, base_dir: Path, config_path: Path) -> AppConfig:
     cal = raw["calibration"]
     geo = raw["geometry"]
     vis = raw["vision"]
-    parts = raw["particles"]
     roi = raw["roi"]
     cal_path = _resolve_path(base_dir, cal["path"])
     geo_path = _resolve_path(base_dir, geo["path"])
@@ -329,14 +305,6 @@ def _from_raw(raw: dict, base_dir: Path, config_path: Path) -> AppConfig:
             min_confidence=float(vis["min_confidence"]),
             model=_resolve_path(base_dir, vis["model"]),
         ),
-        particles=ParticleConfig(
-            style=str(parts["style"]),
-            max_count=int(parts["max_count"]),
-            spawn_per_point=int(parts["spawn_per_point"]),
-            fade_per_second=float(parts["fade_per_second"]),
-            attract=float(parts["attract"]),
-            splash=int(parts["splash"]),
-        ),
         mode=str(raw["mode"]),
         fake_camera=False,
         frames=0,
@@ -350,8 +318,6 @@ def _validate(cfg: AppConfig) -> None:
         raise ConfigError(f"mode must be one of {MODES}.")
     if cfg.vision.method not in VISION_METHODS:
         raise ConfigError(f"vision.method must be one of {VISION_METHODS}.")
-    if cfg.particles.style not in PARTICLE_STYLES:
-        raise ConfigError(f"particles.style must be one of {PARTICLE_STYLES}.")
     if cfg.camera.index < 0:
         raise ConfigError("camera.index must be 0 or more.")
     if cfg.camera.fps <= 0 or cfg.camera.width < 16 or cfg.camera.height < 16:
@@ -383,10 +349,6 @@ def _validate(cfg: AppConfig) -> None:
             raise ConfigError(
                 "undistort.enabled is true but camera_matrix or dist_coeffs is missing."
             )
-    if cfg.particles.max_count < 1 or cfg.particles.spawn_per_point < 0:
-        raise ConfigError("particle counts are invalid.")
-    if cfg.particles.fade_per_second < 0 or cfg.particles.attract < 0:
-        raise ConfigError("particle fade and attract must be 0 or more.")
     if not 4 <= cfg.geometry.bits <= 9:
         raise ConfigError("geometry.bits must be from 4 to 9.")
     if cfg.geometry.settle <= 0:

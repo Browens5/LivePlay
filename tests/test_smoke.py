@@ -29,7 +29,7 @@ def _write_config(directory: Path, width: int = 640, height: int = 360) -> Path:
     data["vision"]["min_area"] = 800
     data["vision"]["max_area_fraction"] = 0.5
     # Boot the color tracker. The MediaPipe path has its own test and
-    # must not be required for these four modes.
+    # must not be required for these modes.
     data["vision"]["method"] = "diff+skin"
     path = directory / "config.json"
     path.write_text(json.dumps(data))

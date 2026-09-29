@@ -25,8 +25,6 @@ class ConfigTest(unittest.TestCase):
                         "passthrough",
                         "--camera",
                         "3",
-                        "--particle-style",
-                        "blobs",
                         "--vision",
                         "skin",
                         "--roi",
@@ -36,7 +34,6 @@ class ConfigTest(unittest.TestCase):
             )
             self.assertEqual(cfg.mode, "passthrough")
             self.assertEqual(cfg.camera.index, 3)
-            self.assertEqual(cfg.particles.style, "blobs")
             self.assertEqual(cfg.vision.method, "skin")
             self.assertEqual(cfg.roi, (4, 5, 6, 7))
             cfg.save()

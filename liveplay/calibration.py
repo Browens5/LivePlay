@@ -1,10 +1,11 @@
-"""Empty-table snapshot.
+"""Empty-table snapshot for the color tracker.
 
-The overhead camera sees the TV. Calibration turns the screen flat gray
-and stores what "nothing on the glass" looks like, including the TV bezel
-in the crop, static glare, and the gray field itself. Vision subtracts
-that frame. If you change the gray level, the ROI, or the room lights,
-snapshot again.
+MediaPipe does not use this photo. `diff` and `diff+skin` do. The
+overhead camera sees the TV, so the snapshot is a flat gray screen with
+nothing on the glass: the field, static glare, and the bezel in the
+crop. If the gray level, the crop, or the room lights change, snapshot
+again. A new display scan throws the old photo away, because the warp
+changed.
 """
 
 from __future__ import annotations

@@ -50,13 +50,5 @@
     "min_confidence": 0.5,
     "model": "models/hand_landmarker.task"
   },
-  "particles": {
-    "style": "sparks",
-    "max_count": 450,
-    "spawn_per_point": 3,
-    "fade_per_second": 0.7,
-    "attract": 900,
-    "splash": 16
-  },
   "mode": "play"
 }

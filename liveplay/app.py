@@ -61,7 +61,6 @@ class Mode:
     FOREST = "forest"
     CALIBRATE = "calibrate"
     GEOMETRY = "geometry"
-    POSE = "pose"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -186,10 +185,8 @@ class Session:
         return geometry
 
     def _enter_startup_mode(self) -> None:
-        # A real webcam measures the TV before play. The fake camera cannot
-        # see the stripes, so it skips straight to the game.
-        if self.mode == Mode.POSE:
-            self.mode = Mode.PLAY
+        # A real webcam measures the TV before a game. The fake camera
+        # cannot see the stripes, so it skips straight to the mode.
         if self.cfg.fake_camera:
             if self.mode == Mode.GEOMETRY:
                 self.mode = Mode.PLAY
@@ -259,13 +256,13 @@ class Session:
             mapped = self.source.map_to_screen(raw)
             # Overlay is the crop check. Circles sit on the stretched
             # camera image, not on the measured TV rectangle.
-            points, _poses = self._detect(raw, align_to_camera=True)
+            points = self._detect(raw, align_to_camera=True)
             blit_bgr(self.screen, mapped)
             draw_points(self.screen, points)
             draw_alignment_guides(self.screen)
             self._draw_warning()
         elif self.mode == Mode.PLAY:
-            points, _poses = self._detect(raw)
+            points = self._detect(raw)
             field = self._field_rect()
             self.soccer.update(points, field, self.dt)
             # Flat gray, only inside the rectangle the TV actually shows.
@@ -276,7 +273,7 @@ class Session:
             self.screen.set_clip(clip)
             self.soccer.draw(self.screen, self.cfg.calibration.gray)
         elif self.mode == Mode.FOREST:
-            points, _poses = self._detect(raw)
+            points = self._detect(raw)
             field = self._field_rect()
             self.forest.update(points, field, self.dt)
             # The picture fills the glass. MediaPipe still looks for a hand
@@ -362,8 +359,14 @@ class Session:
         self.backend.set_background(None)
         if self.return_mode not in (Mode.PLAY, Mode.FOREST):
             self.return_mode = Mode.PLAY
-        self.mode = Mode.CALIBRATE
-        print("[liveplay] TV area measured. Clear the table, then press SPACE.")
+        # MediaPipe does not need the empty-table photo. The color tracker
+        # does, and the old photo is the wrong warp, so it has to be retaken.
+        if self.backend.needs_calibration:
+            self.mode = Mode.CALIBRATE
+            print("[liveplay] TV area measured. Clear the table, then press SPACE.")
+            return
+        self.mode = self.return_mode
+        print(f"[liveplay] TV area measured. mode {self.mode}")
 
     def _tick_calibrate(self, raw) -> None:
         gray = self.cfg.calibration.gray
@@ -411,12 +414,10 @@ class Session:
             frame = self.source.map_to_screen(raw)
         else:
             frame = self._vision_frame(raw)
-        points = self.backend.detect(frame)
-        poses = list(self.backend.last_poses)
-        points = self.tracker.update(points, self.dt)
+        points = self.tracker.update(self.backend.detect(frame), self.dt)
         self._last_points = len(points)
         self._report_warning()
-        return points, poses
+        return points
 
     def _report_warning(self) -> None:
         warning = self.backend.last_warning
