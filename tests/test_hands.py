@@ -1,5 +1,6 @@
 """Palm-center math and the MediaPipe backend, without a webcam."""
 
+import time
 import unittest
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from liveplay.errors import LivePlayError
 from liveplay.hands import (
     HandVision,
     _MediaPipeDetector,
+    _ProcessSlot,
     hand_center,
     limit_metal_frame,
     metal_frame_budget,
@@ -41,6 +43,17 @@ def _cfg(**overrides: object) -> VisionConfig:
     }
     values.update(overrides)
     return VisionConfig(**values)  # type: ignore[arg-type]
+
+
+def _slow_echo_process(conn, delay: float) -> None:
+    """Stand-in for the Mac landmarker process. It answers slowly on purpose."""
+    conn.send(("ready", None))
+    while True:
+        message = conn.recv()
+        if message is None:
+            return
+        time.sleep(delay)
+        conn.send(("ok", [[(0.25, 0.5)] * 21]))
 
 
 def _hand(palm: tuple[float, float], tip: tuple[float, float] = (0.1, 0.1)) -> list[tuple[float, float]]:
@@ -125,15 +138,15 @@ class MetalCacheTest(unittest.TestCase):
         large = metal_frame_budget(640, 360)
         self.assertGreater(small, large)
         self.assertGreaterEqual(large, 12)
-        self.assertLessEqual(small, 300)
+        # A few seconds of 640-wide frames must not exhaust the ceiling.
+        self.assertGreater(large, 300)
 
-    def test_the_mac_tracker_is_rebuilt_before_the_cache_fills(self) -> None:
+    def test_a_slow_reload_does_not_block_the_live_tracker(self) -> None:
         first = _Graph("first")
         second = _Graph("second")
-        opened = []
 
         def reopen():
-            opened.append(second)
+            time.sleep(0.3)
             return second
 
         detector = _MediaPipeDetector(
@@ -142,19 +155,27 @@ class MetalCacheTest(unittest.TestCase):
             metal=True,
             reopen=reopen,
             frame_budget=lambda _w, _h: 3,
-            refresh_s=1e9,
+            cycle_s=0,
+            spare_lead_s=0,
         )
         frame = np.zeros((48, 64, 3), dtype=np.uint8)
-        for _ in range(3):
-            hands = detector.detect(frame, 33)
-            self.assertEqual(len(hands), 1)
-            self.assertEqual(hands[0][0], (0.25, 0.5))
+        started = time.perf_counter()
+        hands = detector.detect(frame, 33)
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 0.15)
+        self.assertEqual(hands[0][0], (0.25, 0.5))
+        self.assertEqual(first.seen, [(48, 64, 4)])
         self.assertFalse(first.closed)
-        self.assertEqual(opened, [])
-        detector.detect(frame, 66)
-        self.assertTrue(first.closed)
+        deadline = time.perf_counter() + 2.0
+        while not second.seen and time.perf_counter() < deadline:
+            detector.detect(frame, 66)
+            time.sleep(0.02)
         self.assertEqual(second.seen, [(48, 64, 4)])
-        self.assertEqual(first.seen, [(48, 64, 4)] * 3)
+        deadline = time.perf_counter() + 1.0
+        while not first.closed and time.perf_counter() < deadline:
+            time.sleep(0.02)
+        self.assertTrue(first.closed)
+        detector.close()
 
     def test_a_failed_rebuild_keeps_the_current_tracker(self) -> None:
         first = _Graph("first")
@@ -168,13 +189,17 @@ class MetalCacheTest(unittest.TestCase):
             metal=True,
             reopen=reopen,
             frame_budget=lambda _w, _h: 1,
-            refresh_s=1e9,
+            cycle_s=0,
+            spare_lead_s=0,
         )
         frame = np.zeros((20, 20, 3), dtype=np.uint8)
         detector.detect(frame, 1)
+        time.sleep(0.05)
         detector.detect(frame, 2)
+        time.sleep(0.05)
         self.assertFalse(first.closed)
-        self.assertEqual(len(first.seen), 2)
+        self.assertGreaterEqual(len(first.seen), 2)
+        detector.close()
 
     def test_the_cpu_tracker_is_not_rebuilt(self) -> None:
         graph = _Graph("cpu")
@@ -184,13 +209,33 @@ class MetalCacheTest(unittest.TestCase):
             metal=False,
             reopen=lambda: (_ for _ in ()).throw(AssertionError("reopened")),
             frame_budget=lambda _w, _h: 1,
-            refresh_s=0,
+            cycle_s=0,
+            spare_lead_s=0,
         )
         frame = np.zeros((16, 16, 3), dtype=np.uint8)
         for stamp in range(5):
             detector.detect(frame, stamp)
         self.assertFalse(graph.closed)
         self.assertEqual(graph.seen, [(16, 16, 3)] * 5)
+
+    def test_a_busy_tracker_process_does_not_stall_the_next_frame(self) -> None:
+        detector = _MediaPipeDetector(
+            _Mp(),
+            _ProcessSlot(target=_slow_echo_process, args=(0.3,)),
+            metal=True,
+            reopen=lambda: (_ for _ in ()).throw(AssertionError("reopened")),
+            cycle_s=1e9,
+        )
+        frame = np.zeros((8, 8, 3), dtype=np.uint8)
+        try:
+            first = detector.detect(frame, 33)
+            self.assertEqual(first[0][0], (0.25, 0.5))
+            started = time.perf_counter()
+            second = detector.detect(frame, 66)
+            self.assertLess(time.perf_counter() - started, 0.1)
+            self.assertEqual(second[0][0], (0.25, 0.5))
+        finally:
+            detector.close()
 
 
 class PalmCenterTest(unittest.TestCase):

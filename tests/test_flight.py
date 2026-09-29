@@ -98,6 +98,21 @@ class FlightCourseTest(unittest.TestCase):
         self.assertEqual(game.players[0].score, 4)
         self.assertEqual(game.players[1].score, 7)
 
+    def test_a_tracking_gap_does_not_trade_the_pterodactyls(self) -> None:
+        game = FlightGame(random.Random(0))
+        game.update([_hand(0.20, 0.40), _hand(0.80, 0.40)], FIELD, 0.016)
+        # The right-hand player is player 0. A reload that drops both
+        # hands and then assigns them from the left would swap the birds.
+        game.players[0].nx = game.players[0].hand_nx = 0.80
+        game.players[1].nx = game.players[1].hand_nx = 0.20
+        game.players[0].score = 4
+        game.players[1].score = 9
+        game.update([_hand(0.80, 0.94), _hand(0.20, 0.94)], FIELD, 0.016)
+        self.assertGreater(game.players[0].nx, 0.7)
+        self.assertLess(game.players[1].nx, 0.3)
+        self.assertEqual(game.players[0].score, 4)
+        self.assertEqual(game.players[1].score, 9)
+
     def test_passing_an_opening_scores_one_point(self) -> None:
         game = FlightGame(random.Random(0))
         hand = _hand(0.40, 0.50)
