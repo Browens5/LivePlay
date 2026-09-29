@@ -33,6 +33,7 @@ from liveplay.display import (
     blit_bgr,
     create_display,
     draw_alignment_guides,
+    draw_caption,
     draw_message,
     draw_points,
     draw_poses,
@@ -290,22 +291,19 @@ class Session:
         if instructions and clip is not None:
             draw_visible_border(self.screen, clip)
         self.screen.set_clip(clip)
-        draw_poses(self.screen, poses)
-        if not instructions:
-            return
-        if clip is None:
-            draw_message(
+        if instructions:
+            # The label sits on the bottom edge. Poses are drawn after it
+            # so a hand there still shows through the words.
+            box = clip
+            if box is None:
+                box = (0, 0, self.screen.get_width(), self.screen.get_height())
+            draw_caption(
                 self.screen,
-                "Check that the hand outline sits on your hand.\n"
-                "Space starts the game. G measures the TV again.",
-                gray=gray,
+                "Space starts the game.  G measures the TV again.",
+                box,
+                gray,
             )
-            return
-        self._draw_inset_message(
-            "The white frame should sit just inside the glass.\n"
-            "The hand outline should sit on your hand.\n"
-            "Space starts the game. G measures the TV again."
-        )
+        draw_poses(self.screen, poses)
 
     def _draw_inset_message(self, message: str) -> None:
         if self.geometry is None:

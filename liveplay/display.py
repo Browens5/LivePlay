@@ -218,6 +218,53 @@ def draw_poses(surface: pygame.Surface, poses) -> None:
             pygame.draw.circle(surface, tip_color, tip, 7)
 
 
+def draw_caption(
+    surface: pygame.Surface,
+    text: str,
+    box: tuple[int, int, int, int] | None = None,
+    gray: int = 90,
+) -> None:
+    """A short line on the bottom edge of `box`. The middle of the glass stays clear.
+
+    The pose check used to paint a full-screen card over the hand outline.
+    This leaves the tracking graphics visible and only labels the bottom edge.
+    """
+    if not text:
+        return
+    if box is None:
+        x, y, width, height = 0, 0, surface.get_width(), surface.get_height()
+    else:
+        x, y, width, height = (int(v) for v in box)
+    if width < 8 or height < 8:
+        return
+    scale, thickness, pad = 0.7, 2, 8
+    max_width = max(40, width - pad * 2)
+    lines = _wrap(text, scale, thickness, max_width)[:2]
+    line_h, baseline = _line_metrics(scale, thickness)
+    step = line_h + baseline + 4
+    text_w = max(_text_width(line or " ", scale, thickness) for line in lines)
+    image_w = min(width, text_w + pad * 2)
+    image_h = min(height, pad * 2 + step * len(lines))
+    image = np.full((image_h, image_w, 3), gray, dtype=np.uint8)
+    cursor = pad + line_h
+    for line in lines:
+        if line:
+            cv2.putText(
+                image,
+                line,
+                (pad, cursor),
+                _FONT,
+                scale,
+                (245, 245, 245),
+                thickness,
+                cv2.LINE_AA,
+            )
+        cursor += step
+    pos_x = int(x) + max(0, (width - image_w) // 2)
+    pos_y = int(y) + max(0, height - image_h - 6)
+    _blit_bgr_at(surface, image, (pos_x, pos_y))
+
+
 def draw_points(surface: pygame.Surface, points: list[InteractionPoint]) -> None:
     for point in points:
         color = (255, 210, 70) if point.is_new else (80, 255, 140)

@@ -56,7 +56,7 @@ DEFAULTS: dict = {
         "path": "calib/display_geometry.json",
         "bits": 7,
         "settle": 0.32,
-        "inset": 12,
+        "inset": 0,
     },
     "mode": "play",
 }

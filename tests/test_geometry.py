@@ -11,7 +11,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import cv2
 import numpy as np
 
-from liveplay.display import draw_poses, draw_visible_border, fill_visible
+from liveplay.display import draw_caption, draw_poses, draw_visible_border, fill_visible
 from liveplay.errors import CalibrationError
 from liveplay.geometry import (
     DisplayScan,
@@ -216,6 +216,12 @@ class DisplayGeometryTest(unittest.TestCase):
             self.assertEqual(surface.get_at((4, 4))[:3], (0, 0, 0))
             self.assertEqual(surface.get_at((639, 359))[:3], (0, 0, 0))
             self.assertNotEqual(surface.get_at((300, 180))[:3], (0, 0, 0))
+            surface.set_clip(None)
+            surface.fill((90, 90, 90))
+            draw_caption(surface, "Space starts the game.", (0, 0, 640, 360), 90)
+            self.assertEqual(surface.get_at((320, 40))[:3], (90, 90, 90))
+            bottom = [surface.get_at((px, 340))[:3] for px in range(80, 560, 8)]
+            self.assertTrue(any(pixel != (90, 90, 90) for pixel in bottom))
         finally:
             pygame.display.quit()
 
