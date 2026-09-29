@@ -29,7 +29,7 @@ One Python process. The stages are separate modules so a second mode can be adde
 | Display fit | `liveplay/geometry.py` | Gray-code scan. Finds the framebuffer rectangle the panel actually lights, and the camera-to-screen map. |
 | Vision | `liveplay/hands.py`, `liveplay/vision.py` | MediaPipe palm centers, or background subtraction plus a skin gate. One mapped frame in, a list of points out. |
 | Points | `liveplay/points.py` | `{x, y, size, vx, vy}` in TV pixels. `x, y` are the screen. Velocity is pixels per second. |
-| Game | `liveplay/soccer.py` | One ball, two goals, and a puck on each hand. |
+| Game | `liveplay/soccer.py`, `liveplay/forest.py` | Soccer, or a dinosaur walking through a forest. |
 | Display | `liveplay/display.py`, `liveplay/app.py` | Fullscreen 1920×1080 on the table, or a window for setup. Play draws only inside the measured rectangle. |
 
 `make_backend()` in `liveplay/vision.py` chooses MediaPipe or the blob tracker. A second game should branch in `Session._tick` and consume `InteractionPoint` only. It should not open the camera itself.
@@ -160,13 +160,19 @@ The field is the same flat gray as calibration, drawn only inside the measured r
 
 `vision.hands` is 2, one puck per player. Raise it (up to 4) if both players put two hands on the glass.
 
-### 4. Leave it in kiosk
+### 4. Forest
+
+Press **4**, or start with `--mode forest`. The glass shows a forest: trees, a mountain, a waterfall, a lake, a rock, and a patch of flowers. A dinosaur walks toward the nearest hand, weaving a little as it goes. Hold a hand over a place and the dinosaur plays there: it stands in the waterfall spray, drinks at the lake, hops on the rock, roars at the mountain, and sniffs the flowers. **3** goes back to soccer.
+
+This picture covers the glass. Use MediaPipe (`vision.method` `mediapipe`). The color tracker `--vision diff+skin` compares the camera to a gray snapshot, so a forest looks like the whole table is a hand.
+
+### 5. Leave it in kiosk
 
 ```bash
 caffeinate -d python -m liveplay --display 1
 ```
 
-Fullscreen, hidden cursor, no menu. The first launch measures the TV and starts the match. Later launches reuse `calib/display_geometry.json`. **Esc** or **Cmd+Q** quits. **1 / 2 / 3 / C / G** are adult shortcuts.
+Fullscreen, hidden cursor, no menu. The first launch measures the TV and starts the match. Later launches reuse `calib/display_geometry.json`. **Esc** or **Cmd+Q** quits. **1 / 2 / 3 / 4 / C / G** are adult shortcuts. **4** is the forest.
 
 ## Config
 
@@ -218,7 +224,7 @@ More detail is commented in `liveplay/hands.py`, `liveplay/vision.py`, `liveplay
 | Key | When | Action |
 | --- | --- | --- |
 | Esc, Cmd+Q, Ctrl+Q | always | Quit |
-| 1 / 2 / 3 | except during a scan | Passthrough / overlay / play |
+| 1 / 2 / 3 / 4 | except during a scan | Passthrough / overlay / soccer / forest |
 | C | except during a scan | Calibration (flat gray) |
 | G | except during a scan | Measure the TV again |
 | Space | calibration | Snapshot the empty table |
@@ -275,6 +281,7 @@ liveplay/vision.py          blob detector and make_backend
 liveplay/points.py          InteractionPoint and the frame-to-frame tracker
 liveplay/particles.py       older spark demo, not used by the match
 liveplay/soccer.py          ball, pucks, goals, and score
+liveplay/forest.py          dinosaur, trees, and the forest places
 liveplay/calibration.py     empty-table snapshot
 liveplay/geometry.py        display-limit scan and camera-to-screen map
 liveplay/display.py         fullscreen window, guides, hand pose, errors
