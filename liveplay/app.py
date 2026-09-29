@@ -32,6 +32,7 @@ from liveplay.display import (
     draw_message,
     draw_points,
     fill_playfield,
+    init_video,
     list_displays,
     present_error,
 )
@@ -77,7 +78,7 @@ def run(cfg: AppConfig) -> int:
     import pygame
 
     try:
-        pygame.init()
+        init_video()
     except pygame.error as exc:
         print(f"[liveplay] error: could not start video: {exc}", file=sys.stderr)
         return 1

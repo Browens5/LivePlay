@@ -11,6 +11,9 @@ from __future__ import annotations
 import os
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+# No samples in this app. Initializing the mixer makes machines without a
+# sound device print a pile of errors before the first frame.
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
 
@@ -19,9 +22,15 @@ from liveplay.errors import DisplayError
 from liveplay.points import InteractionPoint
 
 
+def init_video() -> None:
+    """Start the window system and fonts, not the audio mixer."""
+    pygame.display.init()
+    pygame.font.init()
+
+
 def list_displays() -> int:
-    pygame.init()
     try:
+        init_video()
         sizes = pygame.display.get_desktop_sizes()
     except pygame.error as exc:
         print(f"[liveplay] error: could not list displays: {exc}")
@@ -37,9 +46,7 @@ def list_displays() -> int:
 
 
 def create_display(cfg: AppConfig) -> pygame.Surface:
-    if not pygame.get_init():
-        pygame.init()
-    pygame.display.init()
+    init_video()
     index = resolve_display_index(cfg.display)
     size = (cfg.display.width, cfg.display.height)
     screen = _open_window(size, index, cfg.display.fullscreen)
