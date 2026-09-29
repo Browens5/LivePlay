@@ -8,24 +8,47 @@ the window, alignment guides, and operator messages.
 
 from __future__ import annotations
 
-import os
+import sys
 
-os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
-# No samples in this app. Initializing the mixer makes machines without a
-# sound device print a pile of errors before the first frame.
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+import cv2
+import numpy as np
 
+from liveplay import sdl_env  # noqa: F401  # before pygame
 import pygame
 
 from liveplay.config import AppConfig, DisplayConfig
 from liveplay.errors import DisplayError
 from liveplay.points import InteractionPoint
 
+_FONT = cv2.FONT_HERSHEY_SIMPLEX
+_warned_pygame = False
+
 
 def init_video() -> None:
-    """Start the window system and fonts, not the audio mixer."""
+    """Start the window system, not the audio mixer or pygame.font.
+
+    pygame.font is not used. On Python 3.14 the stock pygame package has
+    no wheels, and the source build crashes in pygame.font.init().
+    """
     pygame.display.init()
-    pygame.font.init()
+    _warn_pygame_build()
+
+
+def _warn_pygame_build() -> None:
+    global _warned_pygame
+    if _warned_pygame or sys.version_info < (3, 14):
+        return
+    if getattr(pygame, "IS_CE", False):
+        return
+    _warned_pygame = True
+    print(
+        "[liveplay] warning: this Python is 3.14 or newer and the installed "
+        "pygame is not pygame-ce. The original pygame package has no 3.14 "
+        "wheels, so pip built it from source and pygame.font crashes. "
+        "Operator text does not use that module. If the window itself fails, run:\n"
+        "  pip uninstall -y pygame\n"
+        "  pip install -r requirements.txt"
+    )
 
 
 def list_displays() -> int:
@@ -122,8 +145,6 @@ def fill_playfield(surface: pygame.Surface, gray: int) -> None:
 
 def blit_bgr(surface: pygame.Surface, frame_bgr) -> None:
     """Copy a BGR numpy frame onto the pygame surface. Sizes must match."""
-    import numpy as np
-
     if frame_bgr.shape[1] != surface.get_width() or frame_bgr.shape[0] != surface.get_height():
         raise DisplayError(
             f"Camera frame is {frame_bgr.shape[1]}x{frame_bgr.shape[0]} but the "
@@ -165,18 +186,77 @@ def draw_points(surface: pygame.Surface, points: list[InteractionPoint]) -> None
 
 
 def draw_message(surface: pygame.Surface, message: str, gray: int = 90) -> None:
-    surface.fill((gray, gray, gray))
-    title_font = pygame.font.Font(None, 72)
-    body_font = pygame.font.Font(None, 40)
-    lines = _wrap(message, body_font, surface.get_width() - 160)
-    y = max(80, surface.get_height() // 2 - (len(lines) + 2) * 24)
-    title = title_font.render("Live Play", True, (250, 250, 250))
-    surface.blit(title, (80, y))
-    y += 90
+    """Operator text. OpenCV's built-in font, not pygame.font.
+
+    pygame.font crashes on the source build pip produces for Python 3.14.
+    """
+    width, height = surface.get_size()
+    image = np.full((height, width, 3), gray, dtype=np.uint8)
+    margin = min(80, max(16, width // 12))
+    max_width = max(40, width - margin * 2)
+    title_scale, body_scale = 2.0, 1.15
+    thickness = 2
+    lines = _wrap(message, body_scale, thickness, max_width)
+    title_h, title_base = _line_metrics(title_scale, thickness + 1)
+    body_h, body_base = _line_metrics(body_scale, thickness)
+    body_step = body_h + body_base + 16
+    block = title_h + title_base + 40 + max(1, len(lines)) * body_step
+    baseline = max(margin + title_h, (height - block) // 2 + title_h)
+    cv2.putText(
+        image,
+        "Live Play",
+        (margin, baseline),
+        _FONT,
+        title_scale,
+        (250, 250, 250),
+        thickness + 1,
+        cv2.LINE_AA,
+    )
+    baseline += title_base + 40 + body_h
     for line in lines:
-        rendered = body_font.render(line, True, (230, 230, 230))
-        surface.blit(rendered, (80, y))
-        y += 48
+        if line:
+            cv2.putText(
+                image,
+                line,
+                (margin, baseline),
+                _FONT,
+                body_scale,
+                (235, 235, 235),
+                thickness,
+                cv2.LINE_AA,
+            )
+        baseline += body_step
+    blit_bgr(surface, image)
+
+
+def draw_status(surface: pygame.Surface, text: str) -> None:
+    """One warning line over the camera view. No pygame.font."""
+    if not text:
+        return
+    scale, thickness, pad = 0.75, 2, 12
+    max_width = max(40, surface.get_width() - 48 - pad * 2)
+    lines = _wrap(text, scale, thickness, max_width)
+    line_h, baseline = _line_metrics(scale, thickness)
+    step = line_h + baseline + 6
+    text_w = max(_text_width(line or " ", scale, thickness) for line in lines)
+    image_w = min(surface.get_width() - 32, text_w + pad * 2)
+    image_h = pad * 2 + step * len(lines)
+    image = np.full((image_h, image_w, 3), 20, dtype=np.uint8)
+    y = pad + line_h
+    for line in lines:
+        if line:
+            cv2.putText(
+                image,
+                line,
+                (pad, y),
+                _FONT,
+                scale,
+                (160, 230, 255),
+                thickness,
+                cv2.LINE_AA,
+            )
+        y += step
+    _blit_bgr_at(surface, image, (24, 24))
 
 
 def present_error(screen: pygame.Surface, message: str, wait_s: float = 20.0) -> None:
@@ -221,17 +301,16 @@ def _desktop_sizes() -> list[tuple[int, int]]:
         return []
 
 
-def _wrap(message: str, font: pygame.font.Font, width: int) -> list[str]:
+def _wrap(message: str, scale: float, thickness: int, width: int) -> list[str]:
     lines: list[str] = []
     for paragraph in message.splitlines():
         if paragraph == "":
             lines.append("")
             continue
-        words = paragraph.split()
         current = ""
-        for word in words:
+        for word in paragraph.split():
             trial = word if not current else f"{current} {word}"
-            if font.size(trial)[0] <= width:
+            if _text_width(trial, scale, thickness) <= width:
                 current = trial
             else:
                 if current:
@@ -240,3 +319,18 @@ def _wrap(message: str, font: pygame.font.Font, width: int) -> list[str]:
         if current:
             lines.append(current)
     return lines or [""]
+
+
+def _line_metrics(scale: float, thickness: int) -> tuple[int, int]:
+    (_width, height), baseline = cv2.getTextSize("Ag", _FONT, scale, thickness)
+    return height, baseline
+
+
+def _text_width(text: str, scale: float, thickness: int) -> int:
+    (width, _height), _baseline = cv2.getTextSize(text, _FONT, scale, thickness)
+    return width
+
+
+def _blit_bgr_at(surface: pygame.Surface, frame_bgr: np.ndarray, pos: tuple[int, int]) -> None:
+    rgb = np.ascontiguousarray(np.transpose(frame_bgr[:, :, ::-1], (1, 0, 2)))
+    surface.blit(pygame.surfarray.make_surface(rgb), pos)

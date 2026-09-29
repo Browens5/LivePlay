@@ -10,6 +10,7 @@ import math
 import random
 from dataclasses import dataclass
 
+from liveplay import sdl_env  # noqa: F401  # before pygame
 import pygame
 
 from liveplay.config import ParticleConfig
