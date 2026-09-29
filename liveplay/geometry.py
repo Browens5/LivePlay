@@ -8,8 +8,9 @@ The scan paints Gray-code stripes (and their inverse) and reads them back
 through the camera. Each camera pixel that lands on the panel gets the
 framebuffer coordinate it is looking at. From that:
 
-* `visible` is the framebuffer rectangle that reaches the glass, shrunk
-  by `inset` so content stays off the fuzzy edge.
+* `visible` is the framebuffer rectangle that reaches the glass. It is
+  the full span of those coordinates. `inset` can pull it in; the
+  default is 0, so the playfield uses the whole lit area.
 * `homography` maps camera pixels onto that framebuffer. Hand contours
   go through it, so a pose drawn on the TV sits under the real hand.
 
@@ -189,7 +190,7 @@ def solve_geometry(
             "The stripe pattern was unreadable. The TV may be slow to update. "
             "Raise geometry.settle in config.json and press SPACE to try again."
         )
-    visible = _bounds(x_map, y_map, valid, inset, frame_size)
+    visible = _bounds(x_map, y_map, valid, inset, frame_size, nbits)
     homography = _homography(x_map, y_map, valid)
     camera_size = (int(dark.shape[1]), int(dark.shape[0]))
     return DisplayGeometry(
@@ -431,12 +432,24 @@ def _bounds(
     valid: np.ndarray,
     inset: int,
     frame_size: tuple[int, int],
+    nbits: int,
 ) -> tuple[int, int, int, int]:
+    """Full span of the framebuffer coordinates the camera actually saw.
+
+    Each code is the center of a stripe. Extending by half a stripe
+    includes that whole stripe. `inset` is an optional extra pull-in;
+    0 keeps the entire lit area.
+    """
     xs = x_map[valid]
     ys = y_map[valid]
-    left, right = np.percentile(xs, [2.0, 98.0])
-    top, bottom = np.percentile(ys, [2.0, 98.0])
     width, height = frame_size
+    levels = float(1 << int(nbits))
+    half_x = 0.5 * width / levels
+    half_y = 0.5 * height / levels
+    left = float(np.min(xs)) - half_x
+    right = float(np.max(xs)) + half_x
+    top = float(np.min(ys)) - half_y
+    bottom = float(np.max(ys)) + half_y
     x0 = int(np.floor(left)) + int(inset)
     y0 = int(np.floor(top)) + int(inset)
     x1 = int(np.ceil(right)) - int(inset)

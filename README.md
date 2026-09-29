@@ -133,7 +133,7 @@ On a real webcam this does three checks before any particles:
 
 1. **Display scan.** Stripes run for about ten seconds (`geometry.bits` 7 and `geometry.settle` 0.32). Keep hands off the glass and leave the webcam still. The terminal prints `display scan 1/30` and so on. When it finishes, a white frame marks the rectangle the panel actually shows. That frame should sit just inside the glass, not off in the bezel. If the stripes were unreadable, the screen says why. **Space** tries again. A slow TV wants a larger `geometry.settle`.
 2. **Empty-table snapshot.** The scan changes the mapping, so the previous photo is discarded. Clear the table and press **Space**. The words disappear and the panel stays gray for a moment so the snapshot does not memorize the text. The file is `calib/empty_table.png` (gitignored).
-3. **Pose check.** A cyan outline, green palm, and blue fingertips are drawn on the glass under a hand. They should sit on the hand, inside the white frame. **Space** starts the particles. **H** hides the pose later. **G** measures the TV again.
+3. **Pose check.** A cyan outline, green palm, and blue fingertips are drawn on the glass under a hand. They should sit on the hand. The only words are a line along the bottom edge, so the outline stays visible. **Space** starts the particles. **H** hides the pose later. **G** measures the TV again.
 
 The camera sees the TV. The snapshot is what “nothing on the glass” looks like, including static glare, after the image has been mapped onto the framebuffer. Play and overlay refuse to guess. If the snapshot is missing or the wrong size, the screen switches to calibration and says so. A corrupt file is an on-screen error, not a hang.
 
@@ -177,7 +177,7 @@ Fullscreen, hidden cursor, no menu. The first launch measures the TV, snapshots 
 | `geometry.path` | `calib/display_geometry.json` | Lit rectangle and camera-to-screen map. Written by the scan. |
 | `geometry.bits` | `7` | Gray-code planes per axis. 7 is 128 steps across the framebuffer. |
 | `geometry.settle` | `0.32` | Seconds a stripe must stay up before the camera frame counts. Raise it if the scan fails. |
-| `geometry.inset` | `12` | Pixels pulled in from the measured edge so content stays off the fuzzy crop. |
+| `geometry.inset` | `0` | Extra pixels pulled in from the measured edge. `0` uses the whole lit area. |
 | `vision.method` | `diff+skin` | `diff`, `skin`, or `diff+skin`. CLI: `--vision`. |
 | `vision.diff_threshold` | `28` | How different a pixel must be from the snapshot. |
 | `vision.min_area` | `2200` | Smallest blob, in full-screen pixels. Hands pass; particle specks do not. |
