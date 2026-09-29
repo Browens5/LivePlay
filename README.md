@@ -48,7 +48,7 @@ On the Vizio, turn off the processing that adds lag and crops the picture:
 - Picture mode **Game** or **Computer** if the set has it.
 - Turn **motion smoothing / ClearAction** off.
 - Turn **overscan** off (Just Scan, Dot by Dot, or 1:1 — the name varies). A cropped HDMI image makes fingers miss the particles.
-- The TV’s own processing is often a bigger delay than this program. The in-app budget is about one camera frame plus the hand tracker. MediaPipe on a half-size frame is about 10 ms on a CPU. A TV in cinema mode can spend the whole 100 ms by itself.
+- The TV’s own processing is often a bigger delay than this program. The in-app budget is about one camera frame plus the hand tracker. MediaPipe on a half-size frame is about 10 ms on a CPU. A Mac uses Metal for the same model. A TV in cinema mode can spend the whole 100 ms by itself.
 
 Cheap panels still crop the HDMI image after those settings. Before play, a real webcam run paints Gray-code stripes and reads them back. Each camera pixel reports the framebuffer coordinate it sees, so the app learns the lit rectangle and draws only there. The margin the TV throws away stays black. Hand positions go through the same map, so a pose drawn on the glass sits under the hand. The result is `calib/display_geometry.json` (gitignored, this TV only). **G** measures again.
 
@@ -61,7 +61,7 @@ On the Mac:
 
 ## Dependencies
 
-Python 3.10 or newer. Nothing is downloaded while the table is running. Hand tracking uses the CPU and the model file already in `models/`.
+Python 3.10 or newer. Nothing is downloaded while the table is running. Hand tracking uses the model file already in `models/`. Linux runs that model on the CPU. A Mac starts MediaPipe's Metal helper, because the macOS build abort()s if that service is left off.
 
 ```bash
 python3 -m venv .venv

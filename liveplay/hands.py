@@ -10,9 +10,12 @@ This module never downloads it. Official MediaPipe wheels are published for
 Python 3.12 and the 1.x package is a py3 wheel, so 3.14 may work; if
 `import mediapipe` fails, the error says so and `--vision diff+skin` still runs.
 
-The landmarker runs on the CPU. `vision.scale` (default 0.5) shrinks the
-frame first. Landmarks come back in 0..1, then are multiplied by the
-full frame size, so the point stays in screen pixels.
+Linux uses the CPU delegate. macOS wheels still open a Metal helper
+inside the detector, and that helper abort()s unless the graph was
+started with the GPU delegate. On a Mac the frames are therefore RGBA,
+which is the only format that helper accepts. `vision.scale` (default
+0.5) shrinks the frame first. Landmarks come back in 0..1, then are
+multiplied by the full frame size, so the point stays in screen pixels.
 
 Video mode keeps a hand identity across frames. The timestamp passed in
 must increase every call. A cyan puck is a disc, not a hand, so the model
@@ -95,11 +98,10 @@ class HandVision:
             small_w = max(1, int(round(width * scale)))
             small_h = max(1, int(round(height * scale)))
             image = cv2.resize(image, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
-        rgb = np.ascontiguousarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
         # Video mode rejects a repeated timestamp. 33 ms is one 30 fps step.
         self._stamp += 33
         try:
-            hands = self._detector.detect(rgb, self._stamp)
+            hands = self._detector.detect(image, self._stamp)
         except Exception as exc:
             self.last_warning = f"Hand tracker failed: {exc}"
             return []
@@ -152,9 +154,15 @@ def open_landmarker(cfg: VisionConfig) -> HandDetector:
             "If that install fails, use a Python 3.12 virtualenv, "
             "or run with --vision diff+skin."
         ) from exc
+    metal = uses_metal(sys.platform)
+    delegate = (
+        mp_python.BaseOptions.Delegate.GPU
+        if metal
+        else mp_python.BaseOptions.Delegate.CPU
+    )
     base = mp_python.BaseOptions(
         model_asset_path=str(path),
-        delegate=mp_python.BaseOptions.Delegate.CPU,
+        delegate=delegate,
     )
     options = vision.HandLandmarkerOptions(
         base_options=base,
@@ -168,16 +176,43 @@ def open_landmarker(cfg: VisionConfig) -> HandDetector:
         landmarker = vision.HandLandmarker.create_from_options(options)
     except Exception as exc:
         raise LivePlayError(f"Could not open the hand model at {path}: {exc}") from exc
-    return _MediaPipeDetector(mp, landmarker)
+    return _MediaPipeDetector(mp, landmarker, metal=metal)
+
+
+def uses_metal(platform: str) -> bool:
+    """True when this OS build abort()s unless the Metal service is on.
+
+    `TensorsToDetectionsCalculator` on the macOS wheel always constructs
+    `DrishtiMetalHelper`. The helper checks for the graph's GPU service
+    and abort()s if it is missing. The CPU delegate never registers that
+    service. The GPU delegate does.
+    """
+    return platform == "darwin"
+
+
+def pack_frame(frame_bgr: np.ndarray, metal: bool) -> np.ndarray:
+    """BGR frame to the layout MediaPipe will accept.
+
+    Metal rejects RGB (`unsupported ImageFrame format`) and wants an
+    alpha channel. The CPU delegate accepts RGB.
+    """
+    if metal:
+        converted = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGBA)
+    else:
+        converted = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    return np.ascontiguousarray(converted)
 
 
 class _MediaPipeDetector:
-    def __init__(self, mp, landmarker) -> None:
+    def __init__(self, mp, landmarker, metal: bool) -> None:
         self._mp = mp
         self._landmarker = landmarker
+        self._metal = metal
 
-    def detect(self, rgb: np.ndarray, timestamp_ms: int) -> list:
-        image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
+    def detect(self, frame_bgr: np.ndarray, timestamp_ms: int) -> list:
+        pixels = pack_frame(frame_bgr, self._metal)
+        image_format = self._mp.ImageFormat.SRGBA if self._metal else self._mp.ImageFormat.SRGB
+        image = self._mp.Image(image_format=image_format, data=pixels)
         result = self._landmarker.detect_for_video(image, int(timestamp_ms))
         landmarks = result.hand_landmarks
         if not landmarks:
