@@ -1,9 +1,10 @@
 """Fullscreen (or windowed) table display.
 
 Soccer paints a flat gray field so the overhead camera is not looking at
-a picture. The forest fills the glass on purpose and relies on the
-hand-shape tracker. This module owns the window, the gray field, the
-score, operator text, and the overlay circles. The games draw themselves.
+a picture. The forest and the pterodactyl flight fill the glass on
+purpose and rely on the hand-shape tracker. This module owns the window,
+the gray field, the score, operator text, and the overlay circles. The
+games draw themselves.
 """
 
 from __future__ import annotations

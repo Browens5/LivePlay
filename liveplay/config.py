@@ -14,7 +14,7 @@ from pathlib import Path
 
 from liveplay.errors import ConfigError
 
-MODES = ("passthrough", "overlay", "play", "forest", "calibrate", "geometry")
+MODES = ("passthrough", "overlay", "play", "forest", "flight", "calibrate", "geometry")
 VISION_METHODS = ("mediapipe", "diff", "skin", "diff+skin")
 
 DEFAULTS: dict = {
@@ -154,6 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python -m liveplay --mode passthrough\n"
             "  python -m liveplay --mode play --display 1\n"
             "  python -m liveplay --mode forest\n"
+            "  python -m liveplay --mode flight\n"
         ),
     )
     parser.add_argument("--config", type=Path, default=Path("config.json"))

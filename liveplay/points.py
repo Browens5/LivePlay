@@ -1,8 +1,8 @@
 """Interaction points shared by vision and the games.
 
 Coordinates are screen pixels on the table display (origin top-left).
-Velocity is pixels per second. Soccer and the forest both consume this
-list. They do not read the camera.
+Velocity is pixels per second. Soccer, the forest, and the flight all
+consume this list. They do not read the camera.
 """
 
 from __future__ import annotations
