@@ -44,7 +44,7 @@ class SmokeTest(unittest.TestCase):
             calibration = root / "empty.png"
             image = np.full((360, 640, 3), 90, dtype=np.uint8)
             self.assertTrue(cv2.imwrite(str(calibration), image))
-            for mode in ("passthrough", "overlay", "play", "forest", "flight", "calibrate"):
+            for mode in ("passthrough", "overlay", "play", "forest", "flight", "garage", "calibrate"):
                 output = io.StringIO()
                 with redirect_stdout(output), redirect_stderr(output):
                     code = main(

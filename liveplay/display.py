@@ -1,8 +1,9 @@
 """Fullscreen (or windowed) table display.
 
 Soccer paints a flat gray field so the overhead camera is not looking at
-a picture. The forest and the pterodactyl flight fill the glass on
-purpose and rely on the hand-shape tracker. This module owns the window,
+a picture. The forest, the pterodactyl flight, and the monster-truck
+garage fill the glass on purpose and rely on the hand-shape tracker.
+This module owns the window,
 the gray field, the score, operator text, and the overlay circles. The
 games draw themselves.
 """
