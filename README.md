@@ -7,7 +7,7 @@ Three games share that camera:
 - **Soccer.** A puck sits on each palm and knocks a ball into the other goal.
 - **Forest.** A dinosaur walks through the trees after the nearest hand, and plays at the waterfall, the lake, the rock, the mountain, and the flowers.
 - **Flight.** Two pterodactyls sit on two hands and swoop through gaps in the branches. Press **5**. The first to 100 points gets confetti.
-- **Garage.** A monster truck starts with no tires. Hover a tire for a second, then an axle, until both wheels are on. Six lug nuts come out of the nut bucket the same way. Hover the wrench, then a wheel, to tighten each nut. Hover **LET'S RACE**. Both tires on and every nut tight, and the truck wins the race. A missed step and it crashes. After the finish, hover **RESET**. The bay has a looping shop riff, and each grab, tire, nut, and wrench turn has its own effect. The winning finish switches to a faster loop. A crash stops the music on impact. Press **6**. If the computer has no speakers, the picture still runs.
+- **Garage.** A monster truck starts with no tires. Hover a tire for a second, then an axle, until both wheels are on. Six lug nuts come out of the bolt bucket the same way. Hover the wrench, then a wheel, to tighten each nut. Hover **LET'S RACE**. Both tires on and every nut tight, and the truck wins the race. A missed step and it crashes. After the finish, hover **RESET**. Press **6**.
 
 ![How the table is wired](docs/system.svg)
 

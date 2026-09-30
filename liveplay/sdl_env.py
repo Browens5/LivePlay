@@ -12,7 +12,7 @@ import os
 import warnings
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
-# Do not force the dummy audio driver. The garage plays music, and a
-# missing device is handled when the mixer opens. Tests set the dummy
-# driver themselves.
+# This app plays no sound. Opening the mixer errors on machines with no
+# audio device before the first frame.
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 warnings.filterwarnings("ignore", category=RuntimeWarning, message=r".*pygame\.font.*")

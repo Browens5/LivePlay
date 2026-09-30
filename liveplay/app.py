@@ -536,8 +536,6 @@ class Session:
     def _set_mode(self, mode: str) -> None:
         if mode == self.mode:
             return
-        if self.mode == Mode.GARAGE and mode != Mode.GARAGE:
-            self.garage.quiet()
         if mode == Mode.CALIBRATE:
             self.return_mode = self.mode if self.mode != Mode.CALIBRATE else Mode.PLAY
             self.arm_until = None

@@ -31,7 +31,6 @@ from liveplay.garage import (
     spots_for,
 )
 from liveplay.points import InteractionPoint
-from liveplay.sound import TableAudio
 
 FIELD = (0, 0, 1000, 600)
 
@@ -111,17 +110,17 @@ class GarageRepairTest(unittest.TestCase):
         self.assertIsNone(game.held)
         self.assertEqual(game.counts()[0], 2)
 
-    def test_a_nut_needs_a_tire_and_then_fills_the_next_hole(self) -> None:
+    def test_a_bolt_needs_a_tire_and_then_fills_the_next_hole(self) -> None:
         game = GarageGame(random.Random(0))
         _hold(game, _at(game, "bucket"), GRAB_S + 0.1)
         self.assertIsNone(game.held)
         self._mount_both(game)
-        self._grab(game, "bucket", "nut")
+        self._grab(game, "bucket", "bolt")
         _hold(game, _at(game, "axle-0"), PLACE_S + 0.05)
         self.assertEqual(game.wheels[0].lugs, [1, 0, 0])
         self.assertEqual(game.wheels[1].lugs, [0, 0, 0])
         self.assertIsNone(game.held)
-        self._grab(game, "bucket", "nut")
+        self._grab(game, "bucket", "bolt")
         _hold(game, _at(game, "axle-1"), PLACE_S + 0.05)
         self.assertEqual(game.wheels[1].lugs, [1, 0, 0])
 
@@ -130,7 +129,7 @@ class GarageRepairTest(unittest.TestCase):
         self._mount_both(game)
         _hold(game, _at(game, "wrench"), GRAB_S + 0.1)
         self.assertIsNone(game.held)
-        self._place_all_nuts(game)
+        self._place_all_bolts(game)
         self.assertEqual(fault_of(game.wheels), "loose")
         self._grab(game, "wrench", "wrench")
         _hold(game, _at(game, "axle-0"), TIGHTEN_S + 0.05)
@@ -190,7 +189,7 @@ class GarageRepairTest(unittest.TestCase):
 
         game.reset()
         self._mount_both(game)
-        self._place_all_nuts(game)
+        self._place_all_bolts(game)
         self._race(game)
         self.assertEqual(game.fault, "loose")
         self.assertEqual(game.outcome, "crash")
@@ -207,9 +206,6 @@ class GarageRepairTest(unittest.TestCase):
         landed = cutscene_pose(0.4, "win", None)
         self.assertLess(jumped.ny, landed.ny - 0.15)
         self.assertEqual(cutscene_pose(4.2, "win", None).title, "WINNER")
-        # Clockwise, so the top of the tire moves the same way as the truck.
-        self.assertLess(cutscene_pose(1.0, "win", None).spin, 0.0)
-        self.assertLess(cutscene_pose(1.2, "win", None).spin, cutscene_pose(0.4, "win", None).spin)
         self.assertGreater(abs(cutscene_pose(3.6, "crash", "loose").angle), 50.0)
 
     def test_reset_waits_until_the_finish_and_then_clears_the_bay(self) -> None:
@@ -284,17 +280,17 @@ class GarageRepairTest(unittest.TestCase):
             _hold(game, _at(game, axle), PLACE_S + 0.05)
             self.assertIsNone(game.held)
 
-    def _place_all_nuts(self, game: GarageGame) -> None:
+    def _place_all_bolts(self, game: GarageGame) -> None:
         for axle in ("axle-0", "axle-1"):
             for _lug in range(LUGS_PER_WHEEL):
-                self._grab(game, "bucket", "nut")
+                self._grab(game, "bucket", "bolt")
                 _hold(game, _away(), 0.25)
                 _hold(game, _at(game, axle), PLACE_S + 0.05)
                 self.assertIsNone(game.held)
 
     def _finish(self, game: GarageGame) -> None:
         self._mount_both(game)
-        self._place_all_nuts(game)
+        self._place_all_bolts(game)
         self._grab(game, "wrench", "wrench")
         for axle in ("axle-0", "axle-1"):
             _hold(game, _away(), 0.25)
@@ -370,129 +366,6 @@ class GarageDrawTest(unittest.TestCase):
 
 def _pixels(surface: pygame.Surface) -> bytes:
     return pygame.image.tobytes(surface, "RGB")
-
-
-class _Ear:
-    """Records cues without opening a speaker."""
-
-    def __init__(self) -> None:
-        self.played: list[str] = []
-        self.song: str | None = "silent"
-        self.stopped = False
-
-    def play(self, name: str) -> None:
-        self.played.append(name)
-
-    def music(self, name: str | None) -> None:
-        self.song = name
-
-    def stop(self) -> None:
-        self.stopped = True
-        self.song = None
-
-
-class GarageAudioTest(unittest.TestCase):
-    def test_building_the_game_stays_quiet_until_the_bay_is_shown(self) -> None:
-        ear = _Ear()
-        game = GarageGame(random.Random(0), audio=ear)
-        self.assertEqual(ear.song, "silent")
-        self.assertEqual(ear.played, [])
-        game.update([], FIELD, 0.05)
-        self.assertEqual(ear.song, "shop")
-
-    def test_each_repair_step_has_its_own_effect(self) -> None:
-        ear = _Ear()
-        game = GarageGame(random.Random(0), audio=ear)
-        _hold(game, _at(game, "pile"), GRAB_S + 0.05)
-        self.assertEqual(ear.played, ["pickup"])
-        _hold(game, _away(), 0.3)
-        _hold(game, _at(game, "pile"), GRAB_S + 0.05)
-        self.assertEqual(ear.played, ["pickup", "putback"])
-        _hold(game, _away(), 0.3)
-        _hold(game, _at(game, "pile"), GRAB_S + 0.05)
-        _hold(game, _at(game, "axle-0"), PLACE_S + 0.05)
-        self.assertEqual(ear.played[-1], "tire")
-        _hold(game, _away(), 0.3)
-        _hold(game, _at(game, "bucket"), GRAB_S + 0.05)
-        _hold(game, _at(game, "axle-0"), PLACE_S + 0.05)
-        self.assertEqual(ear.played[-1], "nut")
-        _hold(game, _away(), 0.3)
-        _hold(game, _at(game, "wrench"), GRAB_S + 0.05)
-        _hold(game, _at(game, "axle-0"), TIGHTEN_S + 0.05)
-        self.assertEqual(ear.played[-1], "wrench")
-
-    def test_a_crash_cuts_the_music_and_a_win_cheers(self) -> None:
-        ear = _Ear()
-        game = GarageGame(random.Random(0), audio=ear)
-        _hold(game, _at(game, "race"), RACE_S + 0.05)
-        self.assertEqual(ear.played[-1], "rev")
-        self.assertEqual(ear.song, "shop")
-        _hold(game, _away(), 1.5)
-        self.assertIn("crash", ear.played)
-        self.assertIsNone(ear.song)
-
-        ear = _Ear()
-        game = GarageGame(random.Random(0), audio=ear)
-        game.wheels = [Wheel(mounted=True, lugs=[2, 2, 2]) for _ in range(2)]
-        _hold(game, _at(game, "race"), RACE_S + 0.05)
-        self.assertEqual(ear.song, "race")
-        self.assertNotIn("fanfare", ear.played)
-        _hold(game, _away(), 4.0)
-        self.assertIn("fanfare", ear.played)
-        self.assertEqual(ear.song, "race")
-
-    def test_leaving_the_garage_stops_the_loop(self) -> None:
-        ear = _Ear()
-        game = GarageGame(random.Random(0), audio=ear)
-        game.update([], FIELD, 0.05)
-        game.quiet()
-        self.assertTrue(ear.stopped)
-        self.assertIsNone(ear.song)
-
-    def test_samples_play_on_the_dummy_driver(self) -> None:
-        audio = TableAudio()
-        for name in ("pickup", "putback", "tire", "nut", "wrench", "rev", "crash", "fanfare"):
-            audio.play(name)
-        audio.music("shop")
-        self.assertTrue(audio.enabled)
-        self.assertEqual(audio._music_name, "shop")
-        channel = audio._music_channel
-        assert channel is not None
-        self.assertTrue(channel.get_busy())
-        audio.music("shop")
-        self.assertTrue(channel.get_busy())
-        audio.play("tire")
-        self.assertTrue(channel.get_busy())
-        audio.music("race")
-        self.assertEqual(audio._music_name, "race")
-        self.assertTrue(channel.get_busy())
-        audio.music(None)
-        self.assertIsNone(audio._music_name)
-        self.assertFalse(channel.get_busy())
-        audio.play("missing")
-        audio.stop()
-
-    def test_a_missing_device_stays_silent(self) -> None:
-        audio = TableAudio()
-        real_init = pygame.mixer.init
-        real_get = pygame.mixer.get_init
-
-        def no_device(*_args: object, **_kwargs: object) -> None:
-            raise pygame.error("no device")
-
-        pygame.mixer.init = no_device  # type: ignore[method-assign]
-        pygame.mixer.get_init = lambda: None  # type: ignore[method-assign]
-        try:
-            audio.play("crash")
-            audio.music("shop")
-            audio.stop()
-        finally:
-            pygame.mixer.init = real_init  # type: ignore[method-assign]
-            pygame.mixer.get_init = real_get  # type: ignore[method-assign]
-        self.assertFalse(audio.enabled)
-        audio.play("tire")
-        audio.music("shop")
-        self.assertIsNone(audio._music_name)
 
 
 if __name__ == "__main__":

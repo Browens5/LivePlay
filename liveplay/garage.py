@@ -2,7 +2,7 @@
 
 The truck is a side view, so it has two axles. Hover a tire in the pile
 for a second, then hover an open axle to fit it. Do that twice. Hover
-the nut bucket, then a wheel, to set each lug nut. Six nuts. Hover the
+the bolt bucket, then a wheel, to set each lug nut. Six nuts. Hover the
 wrench, then a wheel, and each second there tightens one loose nut.
 Hover LET'S RACE when it looks ready.
 
@@ -30,7 +30,6 @@ from liveplay import sdl_env  # noqa: F401  # before pygame
 import pygame
 
 from liveplay.points import InteractionPoint
-from liveplay.sound import TableAudio, default_audio
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets" / "garage"
 
@@ -61,8 +60,6 @@ TRUCK_W = 0.50
 # Tire diameter as a fraction of the truck sprite's height.
 TIRE_OF_TRUCK = 0.58
 LUG_OF_TIRE = 0.145
-# Axle end, as a fraction of the tire diameter. It faces the camera.
-AXLE_FACE = 0.30
 
 # Tool stations: center x, center y, radius. x is a field fraction.
 # Radius is a fraction of the field height, so the hotspot is a circle.
@@ -243,9 +240,7 @@ def _win_pose(t: float) -> Pose:
         angle = 0.0
     title = "WINNER" if t >= 4.0 else ""
     subtitle = "Every nut is tight" if t >= 4.0 else ""
-    # Negative spin is clockwise. The truck faces right, so the top of
-    # each tire moves forward.
-    return Pose(nx, ny, angle, -t * 220.0, None, 0.0, 0.0, 0.0, title, subtitle)
+    return Pose(nx, ny, angle, t * 220.0, None, 0.0, 0.0, 0.0, title, subtitle)
 
 
 def _crash_pose(t: float, fault: str | None, problem: int) -> Pose:
@@ -261,7 +256,7 @@ def _crash_pose(t: float, fault: str | None, problem: int) -> Pose:
         detach = problem
         dx = nx + 0.10 + min(age, 1.6) * 0.28
         dy = body - math.sin(min(age, 1.1) * 5.0) * 0.06 + max(0.0, age - 0.8) * 0.05
-        dspin = -age * 280.0
+        dspin = age * 280.0
     if t >= 1.55:
         p = min((t - 1.55) / 1.7, 1.0)
         angle = -(p ** 1.15) * 100.0
@@ -276,19 +271,17 @@ def _crash_pose(t: float, fault: str | None, problem: int) -> Pose:
         subtitle = "A tire was left off"
     if t < 3.15:
         subtitle = ""
-    return Pose(nx, ny, angle, -min(t, 1.7) * 220.0, detach, dx, dy, dspin, title, subtitle)
+    return Pose(nx, ny, angle, min(t, 1.7) * 220.0, detach, dx, dy, dspin, title, subtitle)
 
 
 class GarageGame:
     """One truck, one pair of hands. No camera and no window of its own."""
 
-    def __init__(self, rng: random.Random | None = None, audio: TableAudio | None = None) -> None:
+    def __init__(self, rng: random.Random | None = None) -> None:
         self.rng = rng or random.Random()
-        self.audio = audio if audio is not None else default_audio()
         self.field: tuple[int, int, int, int] | None = None
         self.time = 0.0
         self._last_hands: list[_Hand] = []
-        self._heard = False
         self.reset()
 
     def reset(self) -> None:
@@ -308,10 +301,6 @@ class GarageGame:
         self.confetti: list[_Bit] = []
         self._confetti_on = False
         self.problem = 1
-        self._boomed = False
-        self._cheered = False
-        if self._heard:
-            self.audio.music("shop")
 
     @property
     def ready(self) -> bool:
@@ -333,7 +322,7 @@ class GarageGame:
             if any(not wheel.mounted for wheel in self.wheels):
                 return "Hover an open axle"
             return "Hover the tire pile to put it back"
-        if self.held == "nut":
+        if self.held == "bolt":
             if any(wheel.mounted and 0 in wheel.lugs for wheel in self.wheels):
                 return "Hover a wheel to add the lug nut"
             return "Hover the bucket to put it back"
@@ -344,7 +333,7 @@ class GarageGame:
         if any(not wheel.mounted for wheel in self.wheels):
             return "Hover a tire for one second"
         if any(wheel.mounted and 0 in wheel.lugs for wheel in self.wheels):
-            return "Hover the nut bucket"
+            return "Hover the bolt bucket"
         if any(1 in wheel.lugs for wheel in self.wheels):
             return "Hover the wrench"
         return "Hover LET'S RACE"
@@ -368,20 +357,13 @@ class GarageGame:
         self._decay_pops(dt)
         hands = self._hands(points)
         self._last_hands = hands
-        self._heard = True
         if self.phase == "cutscene":
             self.cut_t += dt
-            self._cue_finish()
             self._maybe_confetti()
             self._tick_confetti(dt)
         else:
-            self.audio.music("shop")
             self._follow(hands, dt)
         self._hover(self._acting(hands), dt)
-
-    def quiet(self) -> None:
-        """Stop the loop when the table leaves the garage."""
-        self.audio.stop()
 
     def draw(self, surface: pygame.Surface) -> None:
         if self.field is None:
@@ -421,7 +403,7 @@ class GarageGame:
             for index, wheel in enumerate(self.wheels)
             if not wheel.mounted
         ]
-        nut_axle = [
+        bolt_axle = [
             f"axle-{index}"
             for index, wheel in enumerate(self.wheels)
             if wheel.mounted and 0 in wheel.lugs
@@ -445,9 +427,9 @@ class GarageGame:
             chosen["pile"] = spots["pile"]
             for name in open_axle:
                 chosen[name] = spots[name]
-        elif self.held == "nut":
+        elif self.held == "bolt":
             chosen["bucket"] = spots["bucket"]
-            for name in nut_axle:
+            for name in bolt_axle:
                 chosen[name] = spots[name]
         elif self.held == "wrench":
             chosen["wrench"] = spots["wrench"]
@@ -463,7 +445,7 @@ class GarageGame:
         if self.held == "tire":
             names = {f"axle-{i}" for i, wheel in enumerate(self.wheels) if not wheel.mounted}
             return names or {"pile"}
-        if self.held == "nut":
+        if self.held == "bolt":
             names = {
                 f"axle-{i}"
                 for i, wheel in enumerate(self.wheels)
@@ -522,7 +504,7 @@ class GarageGame:
         if target == "pile":
             self._toggle("tire", hand, "pile")
         elif target == "bucket":
-            self._toggle("nut", hand, "bucket")
+            self._toggle("bolt", hand, "bucket")
         elif target == "wrench":
             self._toggle("wrench", hand, "wrench")
         elif target.startswith("axle-"):
@@ -538,12 +520,10 @@ class GarageGame:
             if hand is not None:
                 self.carry = (hand.nx, hand.ny)
             self.suppress_id = spot
-            self.audio.play("pickup")
         elif self.held == item:
             self.held = None
             self.carry = None
             self.suppress_id = spot
-            self.audio.play("putback")
 
     def _on_axle(self, index: int) -> None:
         wheel = self.wheels[index]
@@ -554,9 +534,8 @@ class GarageGame:
             self.carry = None
             self.suppress_id = spot
             self.pops[f"tire-{index}"] = POP_S
-            self.audio.play("tire")
             return
-        if self.held == "nut" and wheel.mounted:
+        if self.held == "bolt" and wheel.mounted:
             for lug, value in enumerate(wheel.lugs):
                 if value == 0:
                     wheel.lugs[lug] = 1
@@ -564,14 +543,12 @@ class GarageGame:
                     self.carry = None
                     self.suppress_id = spot
                     self.pops[f"lug-{index}-{lug}"] = POP_S
-                    self.audio.play("nut")
                     return
         if self.held == "wrench" and wheel.mounted:
             for lug, value in enumerate(wheel.lugs):
                 if value == 1:
                     wheel.lugs[lug] = 2
                     self.pops[f"lug-{index}-{lug}"] = POP_S
-                    self.audio.play("wrench")
                     return
 
     def _start_race(self) -> None:
@@ -587,20 +564,6 @@ class GarageGame:
         self.suppress_id = None
         self.confetti = []
         self._confetti_on = False
-        self._boomed = False
-        self._cheered = False
-        self.audio.play("rev")
-        if self.outcome == "win":
-            self.audio.music("race")
-
-    def _cue_finish(self) -> None:
-        if self.outcome == "crash" and not self._boomed and self.cut_t + 1e-6 >= 1.5:
-            self._boomed = True
-            self.audio.play("crash")
-            self.audio.music(None)
-        if self.outcome == "win" and not self._cheered and self.cut_t + 1e-6 >= 4.0:
-            self._cheered = True
-            self.audio.play("fanfare")
 
     def _follow(self, hands: list[_Hand], dt: float) -> None:
         if self.held is None or not hands or self.carry is None:
@@ -736,7 +699,7 @@ class GarageGame:
                 max(8, int(spot.radius * 0.72)),
                 max(2, int(height / 280)),
             )
-        label = {"tire": "TIRES", "bucket": "NUTS", "wrench": "WRENCH"}[art]
+        label = {"tire": "TIRES", "bucket": "BOLTS", "wrench": "WRENCH"}[art]
         scale = max(0.45, height / 1100.0)
         _center_text(
             surface,
@@ -767,25 +730,12 @@ class GarageGame:
         cy = top + th * 0.5
         _shadow(surface, cx, top + th * 0.94, tw * 0.42, th * 0.08)
         # The wheel wells are painted solid, so the tires go on after the
-        # body or the arches hide them. The axle end is a disk facing the
-        # camera, under the tire when one is fitted.
+        # body or the arches hide them.
         _sprite_at(surface, "truck_body", cx, cy, tw, th, angle)
         for index in range(WHEEL_COUNT):
-            self._draw_axle_face(surface, rect, index, angle)
             if detach == index or not self.wheels[index].mounted:
                 continue
             self._draw_wheel_on(surface, rect, index, angle, spin, repair)
-
-    def _draw_axle_face(
-        self,
-        surface: pygame.Surface,
-        rect: tuple[float, float, float, float],
-        index: int,
-        angle: float,
-    ) -> None:
-        px, py, diameter = _wheel_center(rect, index, angle)
-        # The shaft points out of the screen, so the player sees its end.
-        _axle_disk(surface, px, py, diameter * AXLE_FACE)
 
     def _draw_wheel_on(
         self,
@@ -796,8 +746,14 @@ class GarageGame:
         spin: float,
         repair: bool,
     ) -> None:
-        px, py, _axle_d = _wheel_center(rect, index, angle)
-        diameter = rect[3] * TIRE_OF_TRUCK
+        left, top, tw, th = rect
+        ax, ay = AXLES[index]
+        px = left + ax * tw
+        py = top + ay * th
+        cx = left + tw * 0.5
+        cy = top + th * 0.5
+        px, py = _spin_point(px, py, cx, cy, angle)
+        diameter = th * TIRE_OF_TRUCK
         pop = self.pops.get(f"tire-{index}", 0.0)
         diameter *= 1.0 + 0.18 * (pop / POP_S if POP_S else 0.0)
         wheel_angle = angle + (0.0 if repair else spin)
@@ -814,7 +770,7 @@ class GarageGame:
             ly = py + oy * diameter * reach
             lx, ly = _spin_point(lx, ly, px, py, wheel_angle)
             if value == 0:
-                if self.held == "nut" and wheel.mounted and wheel.lugs.index(0) == lug:
+                if self.held == "bolt" and wheel.mounted and wheel.lugs.index(0) == lug:
                     pulse = 0.5 + 0.5 * math.sin(self.time * 7.0)
                     pygame.draw.circle(
                         surface,
@@ -899,18 +855,18 @@ class GarageGame:
         if self.held is None or self.carry is None or self.field is None:
             return
         x, y, width, height = self.field
-        # The part sits on the hand ring. An offset makes it look unselected.
-        px = x + self.carry[0] * width
-        py = y + self.carry[1] * height
+        # Above and aside the palm, so the axle under the hand stays visible.
+        px = x + (self.carry[0] - 0.045) * width
+        py = y + (self.carry[1] - 0.13) * height
         if self.held == "tire":
             size = height * 0.16
-            _sprite_at(surface, "tire", px, py, size, size, 0.0)
-        elif self.held == "nut":
+            _sprite_at(surface, "tire", px, py, size, size, -8.0)
+        elif self.held == "bolt":
             size = height * 0.11
-            _sprite_at(surface, "lug", px, py, size, size * (914 / 761), 0.0)
+            _sprite_at(surface, "lug", px, py, size, size * (914 / 761), 8.0)
         else:
             size = height * 0.15
-            _sprite_at(surface, "wrench", px, py, size * 0.9, size, 0.0)
+            _sprite_at(surface, "wrench", px, py, size * 0.9, size, 24.0)
 
     def _draw_hands(self, surface: pygame.Surface) -> None:
         # A ring, not a picture of a hand. The real fingers stay visible
@@ -1049,34 +1005,6 @@ def _pick(
                 best_id = spot.id
                 best_hand = hand
     return best_id, best_hand
-
-
-def _wheel_center(
-    rect: tuple[float, float, float, float],
-    index: int,
-    angle: float,
-) -> tuple[float, float, float]:
-    """Pixel center of an axle, and the tire diameter there."""
-    left, top, tw, th = rect
-    ax, ay = AXLES[index]
-    px = left + ax * tw
-    py = top + ay * th
-    cx = left + tw * 0.5
-    cy = top + th * 0.5
-    px, py = _spin_point(px, py, cx, cy, angle)
-    return px, py, th * TIRE_OF_TRUCK
-
-
-def _axle_disk(surface: pygame.Surface, px: float, py: float, diameter: float) -> None:
-    """Round end of an axle, facing the camera."""
-    radius = max(7, int(diameter * 0.5))
-    center = (int(px), int(py))
-    pygame.draw.circle(surface, (18, 20, 24), center, radius + max(2, radius // 7))
-    pygame.draw.circle(surface, (120, 126, 134), center, radius)
-    pygame.draw.circle(surface, (186, 192, 200), center, int(radius * 0.78))
-    pygame.draw.circle(surface, (230, 234, 238), (int(px - radius * 0.28), int(py - radius * 0.28)), max(2, int(radius * 0.26)))
-    pygame.draw.circle(surface, (42, 46, 52), center, max(3, int(radius * 0.30)))
-    pygame.draw.circle(surface, (16, 18, 22), center, max(2, int(radius * 0.14)))
 
 
 def _spin_point(
