@@ -487,12 +487,28 @@ def _stable_match(
     seen = [index for index, player in enumerate(players) if player.seen]
     if not seen or not hands:
         return {}
+    gated = _best_pairing(players, hands, seen, HAND_MATCH)
+    if gated:
+        return gated
+    # A tracking gap can carry both hands past the usual match radius.
+    # Assigning the leftovers from left to right would trade the flyers.
+    # When every flyer still has a hand, keep the closest continuation.
+    if len(hands) == len(seen):
+        return _best_pairing(players, hands, seen, None)
+    return {}
+
+
+def _best_pairing(
+    players: list[Player],
+    hands: list[tuple[float, float, float]],
+    seen: list[int],
+    limit: float | None,
+) -> dict[int, int]:
+    """Try every pairing and keep the one that moves the flyers the least."""
     best: dict[int, int] = {}
     best_cost: float | None = None
-    limit = min(len(seen), len(hands))
-    # Two players and two hands: a handful of pairings, so try them all
-    # and keep the one that moves each flyer the least.
-    for count in range(limit, 0, -1):
+    count_limit = min(len(seen), len(hands))
+    for count in range(count_limit, 0, -1):
         found = False
         for player_ids in permutations(seen, count):
             for hand_ids in permutations(range(len(hands)), count):
@@ -503,7 +519,7 @@ def _stable_match(
                     hand = hands[hand_index]
                     player = players[player_index]
                     dist = math.hypot(hand[0] - player.hand_nx, hand[1] - player.hand_ny)
-                    if dist > HAND_MATCH:
+                    if limit is not None and dist > limit:
                         ok = False
                         break
                     cost += dist
