@@ -6,13 +6,14 @@ geometry     Gray-code scan. Finds the framebuffer rectangle the TV shows.
 play         Soccer. A puck follows each hand and knocks the ball.
 forest       A dinosaur walks through the trees, following a hand.
 flight       Two pterodactyls follow two hands through the branches.
+garage       A monster truck gets its tires, lug nuts, and a race.
 calibrate    Flat gray. SPACE snapshots the empty table.
 passthrough  Camera mapped onto the TV, with corner ticks.
 overlay      Live feed plus blob circles.
 
 Adult keys (keyboard on the Mac, nothing drawn for kids to tap):
   Esc or Cmd/Ctrl+Q   quit
-  1 / 2 / 3 / 4 / 5   passthrough / overlay / play / forest / flight
+  1 / 2 / 3 / 4 / 5 / 6   passthrough / overlay / play / forest / flight / garage
   C                   empty-table snapshot
   G                   measure the TV again
   Space               snapshot, or retry a failed scan
@@ -46,6 +47,7 @@ from liveplay.geometry import DisplayGeometry, DisplayScan, load_geometry, save_
 from liveplay.errors import CalibrationError, CaptureError, ConfigError, LivePlayError
 from liveplay.flight import FlightGame
 from liveplay.forest import ForestGame
+from liveplay.garage import GarageGame
 from liveplay.points import PointTracker
 from liveplay.soccer import SoccerGame
 from liveplay.vision import make_backend
@@ -62,12 +64,13 @@ class Mode:
     PLAY = "play"
     FOREST = "forest"
     FLIGHT = "flight"
+    GARAGE = "garage"
     CALIBRATE = "calibrate"
     GEOMETRY = "geometry"
 
 
 # Modes that paint a game on the glass and need the measured TV rectangle.
-_GAME_MODES = (Mode.PLAY, Mode.FOREST, Mode.FLIGHT)
+_GAME_MODES = (Mode.PLAY, Mode.FOREST, Mode.FLIGHT, Mode.GARAGE)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -154,6 +157,7 @@ class Session:
         self.soccer = SoccerGame()
         self.forest = ForestGame()
         self.flight = FlightGame()
+        self.garage = GarageGame()
         self._enter_startup_mode()
         print(
             f"[liveplay] mode {self.mode}  vision {cfg.vision.method}. "
@@ -210,7 +214,7 @@ class Session:
         self._maybe_need_background()
 
     def _maybe_need_background(self) -> None:
-        if self.mode not in (Mode.PLAY, Mode.FOREST, Mode.FLIGHT, Mode.OVERLAY):
+        if self.mode not in (Mode.PLAY, Mode.FOREST, Mode.FLIGHT, Mode.GARAGE, Mode.OVERLAY):
             return
         if self.backend.needs_calibration and not self.backend.has_background:
             print("[liveplay] no empty-table snapshot yet. Entering calibration.")
@@ -301,6 +305,16 @@ class Session:
             clip = self._paint_field()
             self.screen.set_clip(clip)
             self.flight.draw(self.screen)
+        elif self.mode == Mode.GARAGE:
+            points = self._detect(raw)
+            field = self._field_rect()
+            self.garage.update(points, field, self.dt)
+            # A painted shop. MediaPipe still looks for a hand shape.
+            # diff+skin would see the whole picture as a hand.
+            # See liveplay/garage.py.
+            clip = self._paint_field()
+            self.screen.set_clip(clip)
+            self.garage.draw(self.screen)
         else:
             raise ConfigError(f"Unknown mode {self.mode!r}.")
 
@@ -496,6 +510,8 @@ class Session:
             self._set_mode(Mode.FOREST)
         elif key == pg.K_5:
             self._set_mode(Mode.FLIGHT)
+        elif key == pg.K_6:
+            self._set_mode(Mode.GARAGE)
         elif key == pg.K_g:
             if self.cfg.fake_camera:
                 print("[liveplay] the fake camera cannot see the TV. Skipping the scan.")
@@ -533,6 +549,8 @@ class Session:
                 self.soccer.kickoff()
             elif mode == Mode.FLIGHT:
                 self.flight.reset()
+            elif mode == Mode.GARAGE:
+                self.garage.reset()
         self.tracker.reset()
         self.mode = mode
         print(f"[liveplay] mode {self.mode}")

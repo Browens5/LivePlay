@@ -9,9 +9,9 @@ The webcam looks at the TV, so the picture on the glass is part of the scene.
 
 * `diff` and `diff+skin` need a flat gray snapshot of the empty table.
   Soccer stays that same gray. A photograph or a bright scene differs
-  from the snapshot everywhere and looks like one giant hand. The forest
-  and the pterodactyl flight are that kind of picture, so they need
-  MediaPipe, not this fallback.
+  from the snapshot everywhere and looks like one giant hand. The forest,
+  the pterodactyl flight, and the monster-truck garage are that kind of
+  picture, so they need MediaPipe, not this fallback.
 * `diff+skin` keeps a blob only when it is also skin-colored. The soccer
   puck, ball, goals, and score miss that test. `diff` alone will track
   those graphics.
