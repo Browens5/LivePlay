@@ -16,7 +16,7 @@ The webcam is requested at 1280×720. The picture is cropped so it lines up with
 
 Each hand becomes a point: an x, a y, and a size, in screen pixels. The games follow those points. They do not open the camera themselves.
 
-The tracker is MediaPipe’s Hand Landmarker. The model file ships with the repo at `models/hand_landmarker.task`, and the app does not download it. Linux runs it on the CPU. A Mac starts MediaPipe’s Metal helper, because that build aborts if the helper is left off. That GPU path leaks a graphics surface on every frame and, after a few minutes, aborts with “Error creating pixel buffer: -6662”. Live Play rebuilds the hand model before the cache fills, so a long session keeps tracking. If MediaPipe will not install, soccer can use a color tracker instead (`--vision diff+skin`). The forest and the flight cannot: the painting would look like one large hand.
+The tracker is MediaPipe’s Hand Landmarker. The model file ships with the repo at `models/hand_landmarker.task`, and the app does not download it. Linux runs it on the CPU. A Mac starts MediaPipe’s Metal helper, because that build aborts if the helper is left off. That GPU path leaks a graphics surface on every frame and, after a few minutes, aborts with “Error creating pixel buffer: -6662”. Live Play runs that tracker in its own process and switches to a spare before the cache fills. The game keeps drawing on the live tracker, so play does not pause and the pterodactyls stay with the same hands. If MediaPipe will not install, soccer can use a color tracker instead (`--vision diff+skin`). The forest and the flight cannot: the painting would look like one large hand.
 
 ## The camera is looking at the screen
 

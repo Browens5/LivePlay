@@ -19,10 +19,13 @@ multiplied by the full frame size, so the point stays in screen pixels.
 
 The Mac GPU path also leaks about three BGRA surfaces per frame
 (mediapipe#5267). After a few minutes `CVPixelBufferCreate` fails with
--6662 and the check abort()s the process. Rebuilding the landmarker
-drops that texture cache. The long side of a Mac frame is capped first,
-because the leaked surfaces are the size of the input and the model
-scales the picture down internally anyway.
+-6662 and the check abort()s the process. On a Mac the landmarker
+therefore runs in its own process. A spare process is loaded beside it
+and takes over before that cache is full, so the game thread never
+waits on the reload and a crash in the tracker does not abort the game.
+The long side of a Mac frame is capped first, because the leaked
+surfaces are the size of the input and the model scales the picture
+down internally anyway.
 
 Video mode keeps a hand identity across frames. The timestamp passed in
 must increase every call. A cyan puck is a disc, not a hand, so the model
@@ -32,8 +35,10 @@ when this model is missing.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Protocol
@@ -60,11 +65,14 @@ _PALM = (0, 5, 9, 13, 17)
 
 # Three BGRA buffers per Mac GPU frame. Measured against a 1280×720
 # hand landmarker: about 10.6 MB, which is 12 bytes of footprint per
-# input pixel. 512 MiB is well short of the allocation failure.
+# input pixel. The real failure arrives after a few minutes, so the
+# spare takes over on a short cycle, and this byte ceiling is only a
+# backstop if frames are larger than expected.
 _METAL_LEAK_BYTES_PER_PIXEL = 12
-_METAL_LEAK_BUDGET = 512 * 1024 * 1024
+_METAL_LEAK_BUDGET = 3 * 1024 * 1024 * 1024
 _METAL_LONG_SIDE = 640
-_METAL_REFRESH_S = 10.0
+_METAL_CYCLE_S = 15.0
+_METAL_SPARE_LEAD_S = 8.0
 
 
 class HandDetector(Protocol):
@@ -170,6 +178,20 @@ def open_landmarker(cfg: VisionConfig) -> HandDetector:
         ) from exc
     metal = uses_metal(sys.platform)
     model = path.read_bytes()
+    if metal:
+        # A second process owns the Metal cache. Reloading it happens off
+        # the game thread, and an abort inside MediaPipe stays in the child.
+        def opener() -> _ProcessSlot:
+            return _ProcessSlot(
+                target=_landmarker_process,
+                args=(model, int(cfg.hands), float(cfg.min_confidence)),
+            )
+
+        try:
+            slot = opener()
+        except Exception as exc:
+            raise LivePlayError(f"Could not open the hand model at {path}: {exc}") from exc
+        return _MediaPipeDetector(mp, slot, metal=True, reopen=opener)
     try:
         landmarker = _open_hand_landmarker(mp_python, vision, model, cfg, metal)
     except Exception as exc:
@@ -177,8 +199,8 @@ def open_landmarker(cfg: VisionConfig) -> HandDetector:
     return _MediaPipeDetector(
         mp,
         landmarker,
-        metal=metal,
-        reopen=lambda: _open_hand_landmarker(mp_python, vision, model, cfg, metal),
+        metal=False,
+        reopen=lambda: _open_hand_landmarker(mp_python, vision, model, cfg, False),
     )
 
 
@@ -200,11 +222,19 @@ def _open_hand_landmarker(mp_python, vision, model: bytes, cfg: VisionConfig, me
     return vision.HandLandmarker.create_from_options(options)
 
 
+class _LandmarkerSettings:
+    """The fields `_open_hand_landmarker` reads. Safe to build in a child."""
+
+    def __init__(self, hands: int, min_confidence: float) -> None:
+        self.hands = hands
+        self.min_confidence = min_confidence
+
+
 def metal_frame_budget(width: int, height: int) -> int:
-    """How many Mac GPU frames to run before rebuilding the landmarker."""
+    """How many Mac GPU frames fit under the leak ceiling."""
     leaked = max(1, int(width) * int(height) * _METAL_LEAK_BYTES_PER_PIXEL)
     frames = _METAL_LEAK_BUDGET // leaked
-    return max(12, min(int(frames), 300))
+    return max(12, int(frames))
 
 
 def limit_metal_frame(frame_bgr: np.ndarray, long_side: int = _METAL_LONG_SIDE) -> np.ndarray:
@@ -249,6 +279,142 @@ def pack_frame(frame_bgr: np.ndarray, metal: bool) -> np.ndarray:
     return np.ascontiguousarray(converted)
 
 
+def _infer_in_process(mp, landmarker, frame_bgr: np.ndarray, timestamp_ms: int, metal: bool) -> list:
+    """One in-process detect. The packet is dropped before the next frame."""
+    pixels = pack_frame(frame_bgr, metal)
+    image_format = mp.ImageFormat.SRGBA if metal else mp.ImageFormat.SRGB
+    image = mp.Image(image_format=image_format, data=pixels)
+    result = None
+    try:
+        result = landmarker.detect_for_video(image, int(timestamp_ms))
+        return _copy_hands(getattr(result, "hand_landmarks", None))
+    finally:
+        del result
+        del image
+
+
+def _landmarker_process(conn, model: bytes, hands: int, confidence: float) -> None:
+    """MediaPipe in a child process so its Metal cache cannot abort the game."""
+    landmarker = None
+    try:
+        import mediapipe as mp
+        from mediapipe.tasks import python as mp_python
+        from mediapipe.tasks.python import vision
+
+        settings = _LandmarkerSettings(hands, confidence)
+        landmarker = _open_hand_landmarker(mp_python, vision, model, settings, True)
+        conn.send(("ready", None))
+        while True:
+            message = conn.recv()
+            if message is None:
+                break
+            frame, timestamp_ms = message
+            try:
+                found = _infer_in_process(mp, landmarker, frame, int(timestamp_ms), True)
+            except Exception as exc:
+                conn.send(("err", str(exc)))
+                continue
+            conn.send(("ok", found))
+    except Exception as exc:
+        try:
+            conn.send(("err", str(exc)))
+        except Exception:
+            pass
+    finally:
+        if landmarker is not None:
+            try:
+                landmarker.close()
+            except Exception:
+                pass
+
+
+def _close_slot(slot) -> None:
+    if slot is None:
+        return
+    try:
+        slot.close()
+    except Exception:
+        pass
+
+
+class _ProcessSlot:
+    """One landmarker process. `submit`/`poll` never block the game thread."""
+
+    def __init__(self, target, args: tuple) -> None:
+        context = multiprocessing.get_context("spawn")
+        parent, child = context.Pipe(duplex=True)
+        self._proc = context.Process(target=target, args=(child, *args), daemon=True)
+        self._proc.start()
+        child.close()
+        self._conn = parent
+        self._waiting = False
+        self._wait_until_ready()
+
+    def _wait_until_ready(self) -> None:
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            if self._conn.poll(0.1):
+                kind, payload = self._conn.recv()
+                if kind != "ready":
+                    self.close()
+                    raise RuntimeError(payload or "hand tracker did not start")
+                return
+            if not self._proc.is_alive():
+                self.close()
+                raise RuntimeError("hand tracker stopped while starting")
+        self.close()
+        raise RuntimeError("hand tracker did not start")
+
+    def submit(self, frame_bgr: np.ndarray, timestamp_ms: int) -> None:
+        if self._waiting:
+            return
+        if not self._proc.is_alive():
+            raise RuntimeError("hand tracker stopped")
+        self._conn.send((np.ascontiguousarray(frame_bgr), int(timestamp_ms)))
+        self._waiting = True
+
+    def poll(self):
+        """The latest hands, or None if this frame is still running."""
+        if not self._waiting:
+            return None
+        if not self._conn.poll(0):
+            if not self._proc.is_alive():
+                self._waiting = False
+                raise RuntimeError("hand tracker stopped")
+            return None
+        self._waiting = False
+        kind, payload = self._conn.recv()
+        if kind != "ok":
+            raise RuntimeError(payload or "hand tracker failed")
+        return payload
+
+    def detect(self, frame_bgr: np.ndarray, timestamp_ms: int) -> list:
+        """Block until this frame is done. Used to warm a spare, not to play."""
+        self.submit(frame_bgr, timestamp_ms)
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            found = self.poll()
+            if found is not None:
+                return found
+            time.sleep(0.01)
+        raise TimeoutError("hand tracker timed out")
+
+    def close(self) -> None:
+        try:
+            if self._proc.is_alive():
+                self._conn.send(None)
+        except Exception:
+            pass
+        self._proc.join(0.2)
+        if self._proc.is_alive():
+            self._proc.terminate()
+            self._proc.join(0.2)
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+
 class _MediaPipeDetector:
     def __init__(
         self,
@@ -257,66 +423,180 @@ class _MediaPipeDetector:
         metal: bool,
         reopen,
         frame_budget=metal_frame_budget,
-        refresh_s: float = _METAL_REFRESH_S,
+        cycle_s: float = _METAL_CYCLE_S,
+        spare_lead_s: float = _METAL_SPARE_LEAD_S,
     ) -> None:
         self._mp = mp
         self._landmarker = landmarker
         self._metal = metal
         self._reopen = reopen
         self._frame_budget = frame_budget
-        self._refresh_s = refresh_s
+        self._cycle_s = cycle_s
+        self._spare_lead_s = spare_lead_s
         self._served = 0
         self._opened_at = time.monotonic()
         self._warned = False
+        self._last: list = []
+        self._got_result = False
+        self._closed = False
+        self._starting = False
+        self._ready = None
+        self._lock = threading.Lock()
 
     def detect(self, frame_bgr: np.ndarray, timestamp_ms: int) -> list:
         frame = limit_metal_frame(frame_bgr) if self._metal else frame_bgr
-        self._maybe_refresh(frame)
-        pixels = pack_frame(frame, self._metal)
-        image_format = self._mp.ImageFormat.SRGBA if self._metal else self._mp.ImageFormat.SRGB
-        image = self._mp.Image(image_format=image_format, data=pixels)
-        result = None
-        try:
-            result = self._landmarker.detect_for_video(image, int(timestamp_ms))
-            landmarks = getattr(result, "hand_landmarks", None)
-            return _copy_hands(landmarks)
-        finally:
-            # Drop the packet before the next frame. On a Mac the texture
-            # cache still keeps the surface until `_maybe_refresh` rebuilds
-            # the landmarker.
-            del result
-            del image
-            self._served += 1
+        if self._metal:
+            self._install_spare(frame, force=self._landmarker is None)
+        if isinstance(self._landmarker, _ProcessSlot):
+            return self._detect_async(frame, timestamp_ms)
+        hands = self._infer(self._landmarker, frame, timestamp_ms)
+        self._remember(hands)
+        if self._metal:
+            self._ensure_spare(frame)
+        return hands
 
     def close(self) -> None:
-        self._landmarker.close()
+        with self._lock:
+            self._closed = True
+            ready = self._ready
+            self._ready = None
+        _close_slot(ready)
+        current = self._landmarker
+        self._landmarker = None
+        _close_slot(current)
 
-    def _maybe_refresh(self, frame: np.ndarray) -> None:
-        if not self._metal or self._served <= 0:
-            return
-        height, width = int(frame.shape[0]), int(frame.shape[1])
-        budget = self._frame_budget(width, height)
-        aged = (time.monotonic() - self._opened_at) >= self._refresh_s
-        if self._served < budget and not aged:
-            return
+    def _detect_async(self, frame: np.ndarray, timestamp_ms: int) -> list:
+        slot = self._landmarker
+        if not isinstance(slot, _ProcessSlot):
+            self._ensure_spare(frame, force=True)
+            return list(self._last)
         try:
-            fresh = self._reopen()
+            ready = slot.poll()
+            if ready is not None:
+                self._remember(ready)
+            slot.submit(frame, timestamp_ms)
         except Exception as exc:
-            # Keep the current graph. The next frame tries again. One
-            # failed rebuild must not turn into a frame with no tracker.
-            if not self._warned:
-                print(f"[liveplay] could not refresh the hand tracker ({exc}).")
-                self._warned = True
-            return
+            self._warn(exc)
+            self._drop_current()
+            self._ensure_spare(frame, force=True)
+            return list(self._last)
+        if not self._got_result:
+            self._wait_for_first(slot)
+        self._ensure_spare(frame)
+        return list(self._last)
+
+    def _wait_for_first(self, slot: _ProcessSlot) -> None:
+        deadline = time.monotonic() + 2.0
+        while not self._got_result and time.monotonic() < deadline:
+            try:
+                ready = slot.poll()
+            except Exception as exc:
+                self._warn(exc)
+                self._drop_current()
+                return
+            if ready is not None:
+                self._remember(ready)
+                return
+            time.sleep(0.005)
+
+    def _infer(self, landmarker, frame: np.ndarray, timestamp_ms: int) -> list:
+        if landmarker is None:
+            return list(self._last)
+        if hasattr(landmarker, "detect_for_video"):
+            return _infer_in_process(self._mp, landmarker, frame, timestamp_ms, self._metal)
+        return landmarker.detect(frame, int(timestamp_ms))
+
+    def _remember(self, hands: list) -> None:
+        self._last = hands
+        self._served += 1
+        self._got_result = True
+
+    def _install_spare(self, frame: np.ndarray, force: bool = False) -> None:
+        with self._lock:
+            if self._ready is None:
+                return
+            # The spare is loaded early so the switch itself does not wait.
+            # Leave it idle until this tracker is actually due.
+            if not force and not self._swap_due(frame):
+                return
+            spare = self._ready
+            self._ready = None
         old = self._landmarker
-        self._landmarker = fresh
+        self._landmarker = spare
         self._served = 0
         self._opened_at = time.monotonic()
         self._warned = False
-        try:
-            old.close()
-        except Exception:
-            pass
+        if old is not None:
+            threading.Thread(target=_close_slot, args=(old,), daemon=True).start()
+
+    def _drop_current(self) -> None:
+        old = self._landmarker
+        self._landmarker = None
+        if old is not None:
+            threading.Thread(target=_close_slot, args=(old,), daemon=True).start()
+
+    def _ensure_spare(self, frame: np.ndarray, force: bool = False) -> None:
+        if not self._metal or self._closed:
+            return
+        with self._lock:
+            if self._starting or self._ready is not None:
+                return
+            if not force and not self._spare_due(frame):
+                return
+            self._starting = True
+        warmup = np.ascontiguousarray(frame)
+
+        def build() -> None:
+            orphan = None
+            try:
+                slot = self._reopen()
+                try:
+                    if isinstance(slot, _ProcessSlot) or (
+                        hasattr(slot, "detect") and not hasattr(slot, "detect_for_video")
+                    ):
+                        slot.detect(warmup, 0)
+                except Exception:
+                    _close_slot(slot)
+                    raise
+            except Exception as exc:
+                self._warn(exc)
+                with self._lock:
+                    self._starting = False
+                return
+            with self._lock:
+                if self._closed:
+                    orphan = slot
+                else:
+                    self._ready = slot
+                self._starting = False
+            if orphan is not None:
+                _close_slot(orphan)
+
+        threading.Thread(target=build, name="liveplay-hand-spare", daemon=True).start()
+
+    def _swap_due(self, frame: np.ndarray) -> bool:
+        elapsed = time.monotonic() - self._opened_at
+        if elapsed >= self._cycle_s:
+            return True
+        height, width = int(frame.shape[0]), int(frame.shape[1])
+        return self._served >= self._frame_budget(width, height)
+
+    def _spare_due(self, frame: np.ndarray) -> bool:
+        elapsed = time.monotonic() - self._opened_at
+        if elapsed >= max(0.0, self._cycle_s - self._spare_lead_s):
+            return True
+        if elapsed < 0.25 or self._served <= 0:
+            return False
+        height, width = int(frame.shape[0]), int(frame.shape[1])
+        budget = self._frame_budget(width, height)
+        rate = self._served / elapsed
+        return self._served + rate * self._spare_lead_s >= budget
+
+    def _warn(self, exc: Exception) -> None:
+        if self._warned:
+            return
+        print(f"[liveplay] could not refresh the hand tracker ({exc}).")
+        self._warned = True
 
 
 def _copy_hands(landmarks) -> list:
