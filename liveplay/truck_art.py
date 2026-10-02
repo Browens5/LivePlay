@@ -17,6 +17,14 @@ FRAME_PARTS = ("rail", "towers", "arms", "cage", "bed", "hoop")
 WELD_NAMES = ("rear", "front", "cage", "bed", "hoop", "arm")
 PANEL_PARTS = ("nose", "cabin", "tail", "skirt", "crest")
 KITS = ("megalodon", "mutt", "digger", "kraken", "dragon")
+STICKERS = ("flames", "bolt", "star", "flag")
+# Drop spots on the truck, as fractions of the truck rectangle.
+STICKER_AT = {
+    "hood": (0.76, 0.50),
+    "door": (0.50, 0.46),
+    "bed": (0.24, 0.48),
+    "skirt": (0.42, 0.68),
+}
 
 # A part can drop on the jig only after these are already fitted.
 PART_NEEDS = {
@@ -103,6 +111,7 @@ def draw_body(
     accent: tuple[int, int, int] | None,
     decal: str | None,
     hot: dict[str, float],
+    stickers: dict[str, str] | None = None,
 ) -> None:
     """Blit the built truck, rotated the same way as a pygame sprite."""
     left, top, tw, th = rect
@@ -121,6 +130,7 @@ def draw_body(
         hot=hot,
         show_skin=bool(panels),
         themed=kit in KITS,
+        stickers=stickers or {},
     )
     if abs(angle) > 0.4:
         canvas = pygame.transform.rotate(canvas, angle)
@@ -141,8 +151,11 @@ def draw_icon(
     if kind == "torch":
         _torch(surface, cx, cy, size, time)
         return
-    if kind in PAINTS:
-        _can(surface, cx, cy, size, color or PAINTS[kind])
+    if kind == "livery" or kind in PAINTS:
+        _can(surface, cx, cy, size, color or PAINTS.get(kind, (204, 36, 32)))
+        return
+    if kind in STICKERS:
+        _sticker(surface, kind, cx, cy, size)
         return
     _part_icon(surface, kind, cx, cy, size, color or STEEL)
 
@@ -160,6 +173,7 @@ def _paint_truck(
     hot: dict[str, float],
     show_skin: bool,
     themed: bool,
+    stickers: dict[str, str],
 ) -> None:
     width, height = canvas.get_size()
     line = max(3, height // 58)
@@ -170,6 +184,7 @@ def _paint_truck(
         _beads(canvas, width, height, welds, hot)
     if show_skin and themed:
         _skin(canvas, width, height, kit, panels, body, accent, decal, line)
+        _placed_stickers(canvas, stickers)
     if "towers" in fitted:
         _springs(canvas, width, height)
     if themed and kit == "digger" and ("cabin" in panels or "cage" in fitted):
@@ -846,6 +861,72 @@ def _flames(canvas: pygame.Surface, width: int, height: int, x: float, y: float)
                 (int((x + ox + 0.05) * width), int((y + 0.04) * height)),
             ],
         )
+
+
+def _placed_stickers(canvas: pygame.Surface, stickers: dict[str, str]) -> None:
+    width, height = canvas.get_size()
+    for spot, name in stickers.items():
+        if name not in STICKERS or spot not in STICKER_AT:
+            continue
+        fx, fy = STICKER_AT[spot]
+        _sticker(canvas, name, fx * width, fy * height, height * 0.18)
+
+
+def _sticker(surface: pygame.Surface, name: str, cx: float, cy: float, size: float) -> None:
+    if name == "flames":
+        reach = size * 0.42
+        for ox, tall in ((-0.22, 0.7), (0.0, 1.0), (0.22, 0.65)):
+            points = [
+                (int(cx + ox * size), int(cy + size * 0.28)),
+                (int(cx + (ox + 0.08) * size), int(cy - reach * tall)),
+                (int(cx + (ox + 0.2) * size), int(cy + size * 0.28)),
+            ]
+            pygame.draw.polygon(surface, (232, 96, 24), points)
+            pygame.draw.polygon(surface, INK, points, max(2, int(size * 0.045)))
+            core = [
+                (int(cx + (ox + 0.05) * size), int(cy + size * 0.22)),
+                (int(cx + (ox + 0.08) * size), int(cy - reach * tall * 0.42)),
+                (int(cx + (ox + 0.12) * size), int(cy + size * 0.22)),
+            ]
+            pygame.draw.polygon(surface, (255, 214, 64), core)
+        return
+    if name == "bolt":
+        points = [
+            (cx - size * 0.02, cy - size * 0.36),
+            (cx - size * 0.22, cy + size * 0.02),
+            (cx - size * 0.04, cy + size * 0.02),
+            (cx - size * 0.16, cy + size * 0.36),
+            (cx + size * 0.16, cy - size * 0.04),
+            (cx + size * 0.02, cy - size * 0.04),
+        ]
+        pygame.draw.polygon(surface, INK, [(int(x), int(y)) for x, y in points])
+        pygame.draw.polygon(surface, (255, 214, 48), [(int(x + 1), int(y)) for x, y in points])
+        return
+    if name == "star":
+        points = []
+        for index in range(10):
+            radius = size * (0.38 if index % 2 == 0 else 0.16)
+            angle = -math.pi / 2 + index * math.pi / 5
+            points.append((int(cx + math.cos(angle) * radius), int(cy + math.sin(angle) * radius)))
+        pygame.draw.polygon(surface, INK, points)
+        inner = []
+        for index in range(10):
+            radius = size * (0.30 if index % 2 == 0 else 0.12)
+            angle = -math.pi / 2 + index * math.pi / 5
+            inner.append((int(cx + math.cos(angle) * radius), int(cy + math.sin(angle) * radius)))
+        pygame.draw.polygon(surface, (255, 248, 236), inner)
+        return
+    pole = pygame.Rect(int(cx - size * 0.28), int(cy - size * 0.34), max(3, int(size * 0.06)), int(size * 0.7))
+    pygame.draw.rect(surface, (236, 236, 236), pole)
+    pygame.draw.rect(surface, INK, pole, width=max(1, int(size * 0.02)))
+    flag = pygame.Rect(int(cx - size * 0.22), int(cy - size * 0.34), int(size * 0.5), int(size * 0.32))
+    pygame.draw.rect(surface, (236, 236, 236), flag)
+    cell_w = max(2, flag.w // 4)
+    cell_h = max(2, flag.h // 3)
+    for row in range(3):
+        for col in range(4):
+            if (row + col) % 2 == 0:
+                pygame.draw.rect(surface, INK, pygame.Rect(flag.x + col * cell_w, flag.y + row * cell_h, cell_w, cell_h))
 
 
 def _bolt(canvas: pygame.Surface, width: int, height: int, color: tuple[int, int, int]) -> None:
