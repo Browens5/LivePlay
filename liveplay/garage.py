@@ -1,13 +1,15 @@
 """A monster truck built on the glass, then sent around the track.
 
-The bay starts empty. Hover the frame pieces and drop them on the jig.
-Hover the welding torch, then each joint. Pick a body style, fit the
-panels, then a body color, a stripe, and a decal. After that the truck
-is a side view with two axles and no tires. Hover a tire in the pile
-for a second, then hover an open axle to fit it. Do that twice. Hover
-the nut bucket, then a wheel, to set each lug nut. Six nuts. Hover the
-wrench, then a wheel, and each second there tightens one loose nut.
-Hover LET'S RACE when it looks ready.
+The bay starts empty. Hover a shark, a mutt, a grave digger, a kraken,
+or a dragon. Each truck has its own frame. Hover the frame pieces and
+drop them on the jig, then the welding torch and each joint, then the
+body panels. A paint can does not recolor the truck. The color changes
+when the spray hold on the bay finishes: body, stripe, then a decal.
+After that the truck is a side view with two axles and no tires. Hover
+a tire in the pile for a second, then hover an open axle to fit it. Do
+that twice. Hover the nut bucket, then a wheel, to set each lug nut.
+Six nuts. Hover the wrench, then a wheel, and each second there
+tightens one loose nut. Hover LET'S RACE when it looks ready.
 
 Both tires on and every nut tight: the truck jumps the track and wins.
 Anything left off or left loose: the truck crashes. After the finish,
@@ -35,10 +37,15 @@ import pygame
 from liveplay.points import InteractionPoint
 from liveplay.sound import TableAudio, default_audio
 from liveplay.truck_art import (
+    CREST_LABEL,
     FRAME_PARTS,
+    HOOP_LABEL,
+    KIT_LABEL,
     KITS,
     PAINTS,
     PANEL_PARTS,
+    PART_NEEDS,
+    SHOWCASE,
     WELD_AT,
     WELD_NAMES,
     draw_body,
@@ -87,21 +94,24 @@ AXLE_R = 0.16
 # Build stations. Same hover size as the tire tools, and only one
 # stage shows at a time so the left side never crowds the jig.
 FRAME_STATION = {
-    "frame-rail": (0.10, 0.20, 0.082),
-    "frame-towers": (0.25, 0.20, 0.082),
-    "frame-cage": (0.10, 0.44, 0.082),
-    "frame-bed": (0.25, 0.44, 0.082),
+    "frame-rail": (0.09, 0.16, 0.058),
+    "frame-towers": (0.23, 0.16, 0.058),
+    "frame-arms": (0.09, 0.36, 0.058),
+    "frame-cage": (0.23, 0.36, 0.058),
+    "frame-bed": (0.09, 0.56, 0.058),
+    "frame-hoop": (0.23, 0.56, 0.058),
 }
 PANEL_STATION = {
-    "panel-nose": (0.155, 0.22, 0.10),
-    "panel-cabin": (0.155, 0.46, 0.10),
-    "panel-tail": (0.155, 0.70, 0.10),
+    "panel-nose": (0.09, 0.18, 0.062),
+    "panel-cabin": (0.23, 0.18, 0.062),
+    "panel-tail": (0.09, 0.38, 0.062),
+    "panel-skirt": (0.23, 0.38, 0.062),
+    "panel-crest": (0.16, 0.58, 0.062),
 }
 TORCH_AT = (0.155, 0.72, 0.11)
 KIT_RECT = {
-    "kit-classic": (0.028, 0.16, 0.30, 0.17),
-    "kit-wedge": (0.028, 0.37, 0.30, 0.17),
-    "kit-tube": (0.028, 0.58, 0.30, 0.17),
+    f"kit-{name}": (0.018, 0.105 + index * 0.122, 0.30, 0.112)
+    for index, name in enumerate(KITS)
 }
 DECAL_RECT = {
     "decal-flames": (0.028, 0.18, 0.30, 0.15),
@@ -374,12 +384,12 @@ class GarageGame:
         self.reset()
 
     def reset(self) -> None:
-        """Empty bay. The frame comes off, then the tires."""
+        """Empty bay. Pick a truck, then the frame, then the tires."""
         self.wheels = [Wheel() for _ in range(WHEEL_COUNT)]
         self.held: str | None = None
         self.carry: tuple[float, float] | None = None
         self.phase = "repair"
-        self.stage = "frame"
+        self.stage = "pick"
         self.fitted: set[str] = set()
         self.welds: set[str] = set()
         self.panels: set[str] = set()
@@ -446,13 +456,22 @@ class GarageGame:
         return "Hover LET'S RACE"
 
     def _build_hint(self) -> str:
+        if self.stage == "pick":
+            return "Hover a monster truck"
         if self.stage == "frame":
             if self.held in FRAME_PARTS:
-                if self.held != "rail" and "rail" not in self.fitted:
-                    return "The chassis rail goes on first"
+                if not self._part_ready(self.held):
+                    if "rail" not in self.fitted:
+                        return "The chassis rail goes on first"
+                    return "The axle towers go on before the arms"
                 return "Hover the jig"
-            if "rail" not in self.fitted:
+            nxt = self._next_frame()
+            if nxt == "rail":
                 return "Hover the chassis rail"
+            if nxt == "towers":
+                return "Hover the axle towers"
+            if nxt == "arms":
+                return "Hover the suspension arms"
             return "Hover a frame piece"
         if self.stage == "weld":
             if self.held != "torch":
@@ -460,7 +479,7 @@ class GarageGame:
             return "Hover a joint to weld"
         if self.stage == "body":
             if self.kit is None:
-                return "Hover a body style"
+                return "Hover a monster truck"
             if self.held in PANEL_PARTS:
                 return "Hover the jig to fit the panel"
             return "Hover a body panel"
@@ -684,7 +703,7 @@ class GarageGame:
             self._drop_on_bay()
         elif target.startswith("weld-") and self.held == "torch":
             self._weld(target.split("-", 1)[1])
-        elif target.startswith("kit-") and self.kit is None:
+        elif target.startswith("kit-") and self.stage == "pick" and self.kit is None:
             self._choose_kit(target.split("-", 1)[1])
         elif target.startswith("decal-") and self.coat == "decal":
             self.decal = target.split("-", 1)[1]
@@ -714,7 +733,13 @@ class GarageGame:
             self._placed("bay", "spray", PAINTS[part])
 
     def _part_ready(self, part: str) -> bool:
-        return part == "rail" or "rail" in self.fitted
+        return all(need in self.fitted for need in PART_NEEDS.get(part, ()))
+
+    def _next_frame(self) -> str | None:
+        for part in FRAME_PARTS:
+            if part not in self.fitted and self._part_ready(part):
+                return part
+        return None
 
     def _placed(self, spot: str, sound: str, color: tuple[int, int, int]) -> None:
         self.held = None
@@ -741,14 +766,10 @@ class GarageGame:
             self._enter("body")
 
     def _choose_kit(self, name: str) -> None:
-        if name not in KITS:
+        if name not in KITS or self.kit is not None:
             return
         self.kit = name
-        self.hover_id = None
-        self.hover_t = 0.0
-        self.suppress_id = None
-        self.flash = 0.4
-        self.audio.play("stamp")
+        self._enter("frame")
 
     def _enter(self, stage: str) -> None:
         self.stage = stage
@@ -767,7 +788,10 @@ class GarageGame:
 
     def _build_targets(self, spots: dict[str, Spot]) -> dict[str, Spot]:
         chosen: dict[str, Spot] = {}
-        if self.stage == "frame":
+        if self.stage == "pick":
+            for name in KITS:
+                chosen[f"kit-{name}"] = spots[f"kit-{name}"]
+        elif self.stage == "frame":
             if self.held is None:
                 for part in FRAME_PARTS:
                     if part not in self.fitted:
@@ -808,14 +832,17 @@ class GarageGame:
         return chosen
 
     def _build_suggested(self) -> set[str]:
+        if self.stage == "pick":
+            return {f"kit-{name}" for name in KITS}
         if self.stage == "frame":
             if self.held in FRAME_PARTS:
                 if self._part_ready(self.held):
                     return {"bay"}
                 return {f"frame-{self.held}"}
-            if "rail" not in self.fitted:
-                return {"frame-rail"}
-            return {f"frame-{part}" for part in FRAME_PARTS if part not in self.fitted}
+            nxt = self._next_frame()
+            if nxt is not None:
+                return {f"frame-{nxt}"}
+            return set()
         if self.stage == "weld":
             if self.held != "torch":
                 return {"torch"}
@@ -894,28 +921,24 @@ class GarageGame:
         self.sparks = alive
 
     def _art_state(self) -> dict[str, object]:
+        """What the bay should draw. Paint stays off until a spray lands."""
         kit = self.kit
-        panels = set(self.panels)
-        body = self.body_color
-        accent = self.accent_color
-        decal = self.decal
-        if self.stage == "body" and self.kit is None and self.hover_id and self.hover_id.startswith("kit-"):
+        fitted = self.fitted
+        welds = self.welds
+        panels = self.panels
+        if self.stage == "pick" and self.hover_id and self.hover_id.startswith("kit-"):
             kit = self.hover_id.split("-", 1)[1]
+            fitted = set(FRAME_PARTS)
+            welds = set(WELD_NAMES)
             panels = set(PANEL_PARTS)
-        elif self.stage == "paint" and self.coat == "decal" and self.hover_id and self.hover_id.startswith("decal-"):
-            decal = self.hover_id.split("-", 1)[1]
-        if self.held in PAINTS and self.coat == "body":
-            body = PAINTS[self.held]
-        elif self.held in PAINTS and self.coat == "accent":
-            accent = PAINTS[self.held]
         return {
-            "fitted": self.fitted,
-            "welds": self.welds,
+            "fitted": fitted,
+            "welds": welds,
             "panels": panels,
             "kit": kit,
-            "body": body,
-            "accent": accent,
-            "decal": decal,
+            "body": self.body_color,
+            "accent": self.accent_color,
+            "decal": self.decal,
             "hot": self.weld_hot,
         }
 
@@ -1093,15 +1116,17 @@ class GarageGame:
             self._draw_status(surface)
 
     def _draw_build_stations(self, surface: pygame.Surface, spots: dict[str, Spot]) -> None:
-        if self.stage == "frame":
-            labels = {"rail": "RAIL", "towers": "AXLES", "cage": "CAGE", "bed": "BED"}
-            for part, label in labels.items():
+        if self.stage == "pick":
+            for name in KITS:
+                self._draw_kit_card(surface, spots[f"kit-{name}"], KIT_LABEL[name], name)
+        elif self.stage == "frame":
+            for part in FRAME_PARTS:
                 if part in self.fitted:
                     continue
                 self._draw_chip(
                     surface,
                     spots[f"frame-{part}"],
-                    label,
+                    self._frame_label(part),
                     part,
                     (150, 158, 168),
                     show=self.held != part,
@@ -1115,18 +1140,14 @@ class GarageGame:
                 (210, 150, 36),
                 show=self.held != "torch",
             )
-        elif self.stage == "body" and self.kit is None:
-            for name, title in (("classic", "CLASSIC"), ("wedge", "WEDGE"), ("tube", "TUBE")):
-                self._draw_kit_card(surface, spots[f"kit-{name}"], title, name)
         elif self.stage == "body":
-            labels = {"nose": "NOSE", "cabin": "CAB", "tail": "BED"}
-            for part, label in labels.items():
+            for part in PANEL_PARTS:
                 if part in self.panels:
                     continue
                 self._draw_chip(
                     surface,
                     spots[f"panel-{part}"],
-                    label,
+                    self._panel_label(part),
                     part,
                     (176, 170, 160),
                     show=self.held != part,
@@ -1185,6 +1206,7 @@ class GarageGame:
             preview_w = int(rect.w * 0.62)
             preview_h = max(16, int(preview_w / TRUCK_ASPECT))
         preview = (float(rect.x + 8), float(rect.y + (rect.h - preview_h) * 0.5), float(preview_w), float(preview_h))
+        body, accent = SHOWCASE[kit]
         draw_body(
             surface,
             preview,
@@ -1193,9 +1215,9 @@ class GarageGame:
             welds=set(WELD_NAMES),
             panels=set(PANEL_PARTS),
             kit=kit,
-            body=PAINTS["red"],
-            accent=PAINTS["yellow"],
-            decal="bolt" if kit == "classic" else "flames",
+            body=body,
+            accent=accent,
+            decal=None,
             hot={},
         )
         _center_text(
@@ -1490,6 +1512,16 @@ class GarageGame:
         rect = pygame.Rect(int(spot.rect[0]), int(spot.rect[1]), int(spot.rect[2]), int(spot.rect[3]))
         _button(surface, rect, "RESET", RED, RED_EDGE, self._progress("reset"))
 
+    def _frame_label(self, part: str) -> str:
+        if part == "hoop":
+            return HOOP_LABEL.get(self.kit or "", "HOOP")
+        return {"rail": "RAIL", "towers": "AXLES", "arms": "ARMS", "cage": "CAGE", "bed": "BED"}.get(part, part.upper())
+
+    def _panel_label(self, part: str) -> str:
+        if part == "crest":
+            return CREST_LABEL.get(self.kit or "", "CREST")
+        return {"nose": "NOSE", "cabin": "CAB", "tail": "TAIL", "skirt": "SKIRT"}.get(part, part.upper())
+
     def _progress(self, target: str) -> float:
         if self.hover_id != target or self.hover_t <= 0.0:
             return 0.0
@@ -1503,13 +1535,15 @@ class GarageGame:
         _panel(surface, rect, (*INK, 210))
         tires, placed, tight = self.counts()
         scale = max(0.5, height / 1000.0)
-        if self.stage == "frame":
-            left_label = f"FRAME {len(self.fitted)}/4"
+        if self.stage == "pick":
+            left_label = "PICK"
+        elif self.stage == "frame":
+            left_label = f"FRAME {len(self.fitted)}/{len(FRAME_PARTS)}"
         elif self.stage == "weld":
-            left_label = f"WELD {len(self.welds)}/4"
+            left_label = f"WELD {len(self.welds)}/{len(WELD_NAMES)}"
         elif self.stage == "body":
-            name = self.kit.upper() if self.kit else "BODY"
-            left_label = f"{name} {len(self.panels)}/3" if self.kit else "BODY"
+            name = KIT_LABEL.get(self.kit or "", "BODY")
+            left_label = f"{name} {len(self.panels)}/{len(PANEL_PARTS)}"
         elif self.stage == "paint":
             left_label = "PAINT"
         else:

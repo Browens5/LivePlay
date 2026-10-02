@@ -24,6 +24,7 @@ from liveplay.garage import (
     TRUCK_ASPECT,
     WHEEL_COUNT,
     GarageGame,
+    truck_pixels,
     Wheel,
     axle_center,
     cutscene_pose,
@@ -58,12 +59,14 @@ def _away() -> InteractionPoint:
 
 
 def _built(game: GarageGame) -> None:
-    """Skip the frame, the welds, the panels, and the paint."""
+    """Skip the truck choice, the frame, the welds, the panels, and the paint."""
+    from liveplay.truck_art import FRAME_PARTS, PANEL_PARTS, WELD_NAMES
+
     game.stage = "tires"
-    game.fitted = {"rail", "towers", "cage", "bed"}
-    game.welds = {"rear", "front", "cage", "bed"}
-    game.panels = {"nose", "cabin", "tail"}
-    game.kit = "classic"
+    game.fitted = set(FRAME_PARTS)
+    game.welds = set(WELD_NAMES)
+    game.panels = set(PANEL_PARTS)
+    game.kit = "megalodon"
     game.body_color = (204, 36, 32)
     game.accent_color = (242, 186, 28)
     game.decal = "bolt"
@@ -83,10 +86,11 @@ class GarageRepairTest(unittest.TestCase):
         self.assertEqual(len(game.wheels[0].lugs), LUGS_PER_WHEEL)
         self.assertIsNone(game.held)
         self.assertFalse(game.ready)
-        self.assertEqual(game.stage, "frame")
+        self.assertEqual(game.stage, "pick")
         self.assertEqual(game.fitted, set())
+        self.assertIsNone(game.kit)
         self.assertEqual(fault_of(game.wheels), "tire")
-        self.assertIn("rail", game.hint)
+        self.assertIn("truck", game.hint)
 
     def test_a_tire_is_grabbed_after_one_second_and_not_before(self) -> None:
         game = GarageGame(random.Random(0))
@@ -261,8 +265,9 @@ class GarageRepairTest(unittest.TestCase):
         self.assertIsNone(game.outcome)
         self.assertFalse(any(wheel.mounted for wheel in game.wheels))
         self.assertEqual(game.counts(), (0, 0, 0))
-        self.assertEqual(game.stage, "frame")
+        self.assertEqual(game.stage, "pick")
         self.assertEqual(game.fitted, set())
+        self.assertIsNone(game.kit)
 
     def test_a_full_repair_uses_two_tires_and_six_nuts(self) -> None:
         game = GarageGame(random.Random(0))
@@ -344,6 +349,8 @@ class GarageRepairTest(unittest.TestCase):
 class GarageBuildTest(unittest.TestCase):
     def test_a_frame_piece_waits_for_the_rail(self) -> None:
         game = GarageGame(random.Random(0))
+        game.stage = "frame"
+        game.kit = "megalodon"
         _hold(game, _at(game, "frame-towers"), GRAB_S + 0.05)
         self.assertEqual(game.held, "towers")
         _hold(game, _at(game, "bay"), PLACE_S + 0.1)
@@ -352,18 +359,26 @@ class GarageBuildTest(unittest.TestCase):
         _hold(game, _away(), 0.3)
         _hold(game, _at(game, "frame-towers"), GRAB_S + 0.05)
         self.assertIsNone(game.held)
+        game.fitted.add("rail")
+        _hold(game, _away(), 0.3)
+        _hold(game, _at(game, "frame-arms"), GRAB_S + 0.05)
+        self.assertEqual(game.held, "arms")
+        _hold(game, _at(game, "bay"), PLACE_S + 0.1)
+        self.assertNotIn("arms", game.fitted)
+        self.assertEqual(game.held, "arms")
 
     def test_the_build_runs_frame_weld_body_paint_then_tires(self) -> None:
+        from liveplay.truck_art import FRAME_PARTS, PANEL_PARTS, WELD_NAMES
+
         ear = _Ear()
         game = GarageGame(random.Random(0), audio=ear)
-        for part, spot in (
-            ("rail", "frame-rail"),
-            ("towers", "frame-towers"),
-            ("cage", "frame-cage"),
-            ("bed", "frame-bed"),
-        ):
+        _hold(game, _at(game, "kit-dragon"), GRAB_S + 0.05)
+        self.assertEqual(game.kit, "dragon")
+        self.assertEqual(game.stage, "frame")
+        self.assertIsNone(game.body_color)
+        for part in FRAME_PARTS:
             _hold(game, _away(), 0.25)
-            _hold(game, _at(game, spot), GRAB_S + 0.05)
+            _hold(game, _at(game, f"frame-{part}"), GRAB_S + 0.05)
             self.assertEqual(game.held, part)
             _hold(game, _at(game, "bay"), PLACE_S + 0.05)
             self.assertIn(part, game.fitted)
@@ -374,28 +389,27 @@ class GarageBuildTest(unittest.TestCase):
         _hold(game, _away(), 0.25)
         _hold(game, _at(game, "torch"), GRAB_S + 0.05)
         self.assertEqual(game.held, "torch")
-        for name in ("rear", "front", "cage", "bed"):
+        for name in WELD_NAMES:
             _hold(game, _away(), 0.25)
             _hold(game, _at(game, f"weld-{name}"), TIGHTEN_S + 0.05)
             self.assertIn(name, game.welds)
         self.assertEqual(game.stage, "body")
-        self.assertIsNone(game.kit)
-        _hold(game, _at(game, "kit-wedge"), GRAB_S + 0.05)
-        self.assertEqual(game.kit, "wedge")
-        for part, spot in (("nose", "panel-nose"), ("cabin", "panel-cabin"), ("tail", "panel-tail")):
+        for part in PANEL_PARTS:
             _hold(game, _away(), 0.25)
-            _hold(game, _at(game, spot), GRAB_S + 0.05)
+            _hold(game, _at(game, f"panel-{part}"), GRAB_S + 0.05)
             _hold(game, _at(game, "bay"), PLACE_S + 0.05)
             self.assertIn(part, game.panels)
         self.assertEqual(game.stage, "paint")
         _hold(game, _away(), 0.25)
         _hold(game, _at(game, "color-blue"), GRAB_S + 0.05)
         self.assertEqual(game.held, "blue")
+        self.assertIsNone(game.body_color)
         _hold(game, _at(game, "bay"), PLACE_S + 0.05)
         self.assertEqual(game.body_color, (28, 108, 204))
         self.assertEqual(game.coat, "accent")
         _hold(game, _away(), 0.25)
         _hold(game, _at(game, "color-white"), GRAB_S + 0.05)
+        self.assertIsNone(game.accent_color)
         _hold(game, _at(game, "bay"), PLACE_S + 0.05)
         self.assertEqual(game.accent_color, (236, 238, 236))
         self.assertEqual(game.coat, "decal")
@@ -410,6 +424,8 @@ class GarageBuildTest(unittest.TestCase):
         self.assertIn("stamp", ear.played)
 
     def test_body_styles_and_paint_change_the_truck(self) -> None:
+        from liveplay.truck_art import FRAME_PARTS, PANEL_PARTS, WELD_NAMES
+
         pygame.display.init()
         try:
             pygame.display.set_mode((FIELD[2], FIELD[3]))
@@ -418,25 +434,34 @@ class GarageBuildTest(unittest.TestCase):
             game.update([], FIELD, 0.05)
             game.draw(surface)
             bare = _pixels(surface)
-            game.fitted = {"rail", "towers", "cage", "bed"}
-            game.welds = {"rear", "front", "cage", "bed"}
+            game.fitted = set(FRAME_PARTS)
+            game.welds = set(WELD_NAMES)
             game.stage = "body"
-            game.kit = "classic"
-            game.panels = {"nose", "cabin", "tail"}
+            game.kit = "megalodon"
+            game.panels = set(PANEL_PARTS)
             game.draw(surface)
             primer = _pixels(surface)
             self.assertNotEqual(primer, bare)
+            game.stage = "paint"
+            game.coat = "body"
+            game.draw(surface)
+            cabin = _truck_at(surface, 0.50, 0.55)
+            self.assertEqual(cabin, (176, 170, 160))
+            game.held = "red"
+            game.draw(surface)
+            self.assertEqual(_truck_at(surface, 0.50, 0.55), cabin)
+            game.held = None
             game.body_color = (28, 108, 204)
             game.accent_color = (242, 186, 28)
             game.draw(surface)
-            self.assertNotEqual(_pixels(surface), primer)
-            classic = _pixels(surface)
-            game.kit = "wedge"
+            self.assertEqual(_truck_at(surface, 0.50, 0.55), (28, 108, 204))
+            shark = _pixels(surface)
+            game.kit = "dragon"
             game.draw(surface)
-            self.assertNotEqual(_pixels(surface), classic)
-            game.kit = "tube"
+            self.assertNotEqual(_pixels(surface), shark)
+            game.kit = "digger"
             game.draw(surface)
-            self.assertNotEqual(_pixels(surface), classic)
+            self.assertNotEqual(_pixels(surface), shark)
         finally:
             pygame.display.quit()
 
@@ -502,6 +527,11 @@ class GarageDrawTest(unittest.TestCase):
 
 def _pixels(surface: pygame.Surface) -> bytes:
     return pygame.image.tobytes(surface, "RGB")
+
+
+def _truck_at(surface: pygame.Surface, fx: float, fy: float) -> tuple[int, int, int]:
+    left, top, tw, th = truck_pixels(FIELD)
+    return surface.get_at((int(left + tw * fx), int(top + th * fy)))[:3]
 
 
 class _Ear:
