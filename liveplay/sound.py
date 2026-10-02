@@ -99,6 +99,10 @@ def _effects() -> dict[str, np.ndarray]:
         "rev": _sweep(70, 160, 0.55),
         "crash": _crash(),
         "fanfare": _fanfare(),
+        "clank": _clank(),
+        "weld": _weld(),
+        "spray": _spray(),
+        "stamp": _blip(520, 880, 0.16),
     }
 
 
@@ -190,6 +194,29 @@ def _crash() -> np.ndarray:
     _add(mix, boom, 0)
     _add(mix, noise, 0)
     return _clip(mix)
+
+
+def _clank() -> np.ndarray:
+    mix = np.zeros(int(RATE * 0.24), np.float32)
+    _add(mix, _ping(220) * 0.85, 0.0)
+    _add(mix, _ping(130) * 0.55, 0.045)
+    _add(mix, _noise(0.08, 3) * 0.4, 0.0)
+    return _clip(mix)
+
+
+def _weld() -> np.ndarray:
+    n = int(RATE * 0.22)
+    t = np.arange(n) / RATE
+    noise = _noise_samples(n, 9) * np.exp(-t * 7)
+    buzz = np.sign(np.sin(2 * np.pi * 80 * t)) * np.exp(-t * 8) * 0.18
+    return _clip((noise * 0.6 + buzz).astype(np.float32))
+
+
+def _spray() -> np.ndarray:
+    n = int(RATE * 0.32)
+    t = np.arange(n) / RATE
+    env = np.sin(np.clip(t / 0.32, 0, 1) * np.pi)
+    return _clip((_noise_samples(n, 2) * env * 0.4).astype(np.float32))
 
 
 def _fanfare() -> np.ndarray:

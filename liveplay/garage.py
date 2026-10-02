@@ -1,6 +1,9 @@
-"""A monster truck with no tires, and the parts to put them on.
+"""A monster truck built on the glass, then sent around the track.
 
-The truck is a side view, so it has two axles. Hover a tire in the pile
+The bay starts empty. Hover the frame pieces and drop them on the jig.
+Hover the welding torch, then each joint. Pick a body style, fit the
+panels, then a body color, a stripe, and a decal. After that the truck
+is a side view with two axles and no tires. Hover a tire in the pile
 for a second, then hover an open axle to fit it. Do that twice. Hover
 the nut bucket, then a wheel, to set each lug nut. Six nuts. Hover the
 wrench, then a wheel, and each second there tightens one loose nut.
@@ -31,6 +34,16 @@ import pygame
 
 from liveplay.points import InteractionPoint
 from liveplay.sound import TableAudio, default_audio
+from liveplay.truck_art import (
+    FRAME_PARTS,
+    KITS,
+    PAINTS,
+    PANEL_PARTS,
+    WELD_AT,
+    WELD_NAMES,
+    draw_body,
+    draw_icon,
+)
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets" / "garage"
 
@@ -70,6 +83,40 @@ PILE = (0.155, 0.28, 0.115)
 BUCKET = (0.155, 0.52, 0.108)
 WRENCH_SPOT = (0.155, 0.745, 0.100)
 AXLE_R = 0.16
+
+# Build stations. Same hover size as the tire tools, and only one
+# stage shows at a time so the left side never crowds the jig.
+FRAME_STATION = {
+    "frame-rail": (0.10, 0.20, 0.082),
+    "frame-towers": (0.25, 0.20, 0.082),
+    "frame-cage": (0.10, 0.44, 0.082),
+    "frame-bed": (0.25, 0.44, 0.082),
+}
+PANEL_STATION = {
+    "panel-nose": (0.155, 0.22, 0.10),
+    "panel-cabin": (0.155, 0.46, 0.10),
+    "panel-tail": (0.155, 0.70, 0.10),
+}
+TORCH_AT = (0.155, 0.72, 0.11)
+KIT_RECT = {
+    "kit-classic": (0.028, 0.16, 0.30, 0.17),
+    "kit-wedge": (0.028, 0.37, 0.30, 0.17),
+    "kit-tube": (0.028, 0.58, 0.30, 0.17),
+}
+DECAL_RECT = {
+    "decal-flames": (0.028, 0.18, 0.30, 0.15),
+    "decal-bolt": (0.028, 0.37, 0.30, 0.15),
+    "decal-plain": (0.028, 0.56, 0.30, 0.15),
+}
+PAINT_AT = {
+    "red": (0.10, 0.18),
+    "yellow": (0.25, 0.18),
+    "blue": (0.10, 0.38),
+    "green": (0.25, 0.38),
+    "orange": (0.10, 0.58),
+    "white": (0.25, 0.58),
+}
+PAINT_R = 0.072
 
 RACE_RECT = (0.695, 0.028, 0.275, 0.108)
 RESET_RECT = (0.028, 0.028, 0.20, 0.108)
@@ -152,6 +199,18 @@ class _Bit:
     color: tuple[int, int, int]
 
 
+@dataclass
+class _Spark:
+    nx: float
+    ny: float
+    vx: float
+    vy: float
+    life: float
+    max_life: float
+    color: tuple[int, int, int]
+    size: float
+
+
 def truck_pixels(field: tuple[int, int, int, int]) -> tuple[float, float, float, float]:
     """Pixel rect of the truck sprite inside `field` (left, top, width, height)."""
     x, y, width, height = field
@@ -192,6 +251,29 @@ def spots_for(field: tuple[int, int, int, int]) -> dict[str, Spot]:
             box[1] + box[3] * 0.5,
             0.0,
             box,
+        )
+    left, top, tw, th = truck_pixels(field)
+    pad_x, pad_y = tw * 0.02, th * 0.04
+    bay = (left - pad_x, top - pad_y, tw + pad_x * 2, th + pad_y * 2)
+    spots["bay"] = Spot("bay", "rect", bay[0] + bay[2] * 0.5, bay[1] + bay[3] * 0.5, 0.0, bay)
+    for name, (nx, ny, radius) in {**FRAME_STATION, **PANEL_STATION}.items():
+        spots[name] = Spot(name, "circle", x + nx * width, y + ny * height, radius * height)
+    nx, ny, radius = TORCH_AT
+    spots["torch"] = Spot("torch", "circle", x + nx * width, y + ny * height, radius * height)
+    weld_r = max(28.0, th * 0.12)
+    for name, (fx, fy) in WELD_AT.items():
+        spots[f"weld-{name}"] = Spot(f"weld-{name}", "circle", left + fx * tw, top + fy * th, weld_r)
+    for name, rect in {**KIT_RECT, **DECAL_RECT}.items():
+        rx, ry, rw, rh = rect
+        box = (x + rx * width, y + ry * height, rw * width, rh * height)
+        spots[name] = Spot(name, "rect", box[0] + box[2] * 0.5, box[1] + box[3] * 0.5, 0.0, box)
+    for name, (nx, ny) in PAINT_AT.items():
+        spots[f"color-{name}"] = Spot(
+            f"color-{name}",
+            "circle",
+            x + nx * width,
+            y + ny * height,
+            PAINT_R * height,
         )
     return spots
 
@@ -292,11 +374,23 @@ class GarageGame:
         self.reset()
 
     def reset(self) -> None:
-        """Empty bay. Tires off, nuts off, nothing in hand."""
+        """Empty bay. The frame comes off, then the tires."""
         self.wheels = [Wheel() for _ in range(WHEEL_COUNT)]
         self.held: str | None = None
         self.carry: tuple[float, float] | None = None
         self.phase = "repair"
+        self.stage = "frame"
+        self.fitted: set[str] = set()
+        self.welds: set[str] = set()
+        self.panels: set[str] = set()
+        self.kit: str | None = None
+        self.body_color: tuple[int, int, int] | None = None
+        self.accent_color: tuple[int, int, int] | None = None
+        self.decal: str | None = None
+        self.coat = "body"
+        self.weld_hot: dict[str, float] = {}
+        self.sparks: list[_Spark] = []
+        self.flash = 0.0
         self.outcome: str | None = None
         self.fault: str | None = None
         self.cut_t = 0.0
@@ -325,6 +419,8 @@ class GarageGame:
             if self.hover_id == "reset":
                 return "Hold to play again"
             return "Hover RESET to try again"
+        if self.stage != "tires":
+            return self._build_hint()
         if self.hover_id == "race":
             if self.ready:
                 return "Hold still to race"
@@ -348,6 +444,35 @@ class GarageGame:
         if any(1 in wheel.lugs for wheel in self.wheels):
             return "Hover the wrench"
         return "Hover LET'S RACE"
+
+    def _build_hint(self) -> str:
+        if self.stage == "frame":
+            if self.held in FRAME_PARTS:
+                if self.held != "rail" and "rail" not in self.fitted:
+                    return "The chassis rail goes on first"
+                return "Hover the jig"
+            if "rail" not in self.fitted:
+                return "Hover the chassis rail"
+            return "Hover a frame piece"
+        if self.stage == "weld":
+            if self.held != "torch":
+                return "Hover the welding torch"
+            return "Hover a joint to weld"
+        if self.stage == "body":
+            if self.kit is None:
+                return "Hover a body style"
+            if self.held in PANEL_PARTS:
+                return "Hover the jig to fit the panel"
+            return "Hover a body panel"
+        if self.coat == "decal":
+            return "Hover flames, a bolt, or plain"
+        if self.held in PAINTS:
+            if self.coat == "body":
+                return "Hover the truck to spray the body"
+            return "Hover the truck to spray the stripe"
+        if self.coat == "body":
+            return "Hover a body color"
+        return "Hover a stripe color"
 
     def counts(self) -> tuple[int, int, int]:
         """Tires mounted, nuts placed, nuts tightened."""
@@ -378,6 +503,9 @@ class GarageGame:
             self.audio.music("shop")
             self._follow(hands, dt)
         self._hover(self._acting(hands), dt)
+        self._cool(dt)
+        self._ambience()
+        self._tick_sparks(dt)
 
     def quiet(self) -> None:
         """Stop the loop when the table leaves the garage."""
@@ -411,6 +539,8 @@ class GarageGame:
         return spots_for(self.field)
 
     def _actionable(self, spots: dict[str, Spot]) -> dict[str, Spot]:
+        if self.phase == "repair" and self.stage != "tires":
+            return self._build_targets(spots)
         if self.phase != "repair":
             if self.cut_t >= RESET_AFTER_S and "reset" in spots:
                 return {"reset": spots["reset"]}
@@ -456,6 +586,8 @@ class GarageGame:
         return chosen
 
     def _suggested(self) -> set[str]:
+        if self.phase == "repair" and self.stage != "tires":
+            return self._build_suggested()
         if self.phase != "repair":
             if self.cut_t >= RESET_AFTER_S:
                 return {"reset"}
@@ -516,9 +648,16 @@ class GarageGame:
     def _hold_needed(self, target: str) -> float:
         if target.startswith("axle-"):
             return TIGHTEN_S if self.held == "wrench" else PLACE_S
-        return HOLD.get(target, PLACE_S)
+        if target.startswith("weld-"):
+            return TIGHTEN_S
+        if target == "bay":
+            return PLACE_S
+        return HOLD.get(target, GRAB_S)
 
     def _fire(self, target: str, hand: _Hand | None) -> None:
+        if self.stage != "tires":
+            self._fire_build(target, hand)
+            return
         if target == "pile":
             self._toggle("tire", hand, "pile")
         elif target == "bucket":
@@ -531,6 +670,254 @@ class GarageGame:
             self._start_race()
         elif target == "reset" and self.phase == "cutscene":
             self.reset()
+
+    def _fire_build(self, target: str, hand: _Hand | None) -> None:
+        if target.startswith("frame-"):
+            self._toggle(target.split("-", 1)[1], hand, target)
+        elif target.startswith("panel-"):
+            self._toggle(target.split("-", 1)[1], hand, target)
+        elif target.startswith("color-"):
+            self._toggle(target.split("-", 1)[1], hand, target)
+        elif target == "torch":
+            self._toggle("torch", hand, "torch")
+        elif target == "bay":
+            self._drop_on_bay()
+        elif target.startswith("weld-") and self.held == "torch":
+            self._weld(target.split("-", 1)[1])
+        elif target.startswith("kit-") and self.kit is None:
+            self._choose_kit(target.split("-", 1)[1])
+        elif target.startswith("decal-") and self.coat == "decal":
+            self.decal = target.split("-", 1)[1]
+            self._enter("tires")
+
+    def _drop_on_bay(self) -> None:
+        part = self.held
+        if part in FRAME_PARTS and part not in self.fitted and self._part_ready(part):
+            self.fitted.add(part)
+            self._placed("bay", "clank", (190, 198, 206))
+            if len(self.fitted) == len(FRAME_PARTS):
+                self._enter("weld")
+            return
+        if part in PANEL_PARTS and self.kit is not None and part not in self.panels:
+            self.panels.add(part)
+            self._placed("bay", "clank", (176, 170, 160))
+            if len(self.panels) == len(PANEL_PARTS):
+                self._enter("paint")
+            return
+        if part in PAINTS and self.coat in ("body", "accent"):
+            if self.coat == "body":
+                self.body_color = PAINTS[part]
+                self.coat = "accent"
+            else:
+                self.accent_color = PAINTS[part]
+                self.coat = "decal"
+            self._placed("bay", "spray", PAINTS[part])
+
+    def _part_ready(self, part: str) -> bool:
+        return part == "rail" or "rail" in self.fitted
+
+    def _placed(self, spot: str, sound: str, color: tuple[int, int, int]) -> None:
+        self.held = None
+        self.carry = None
+        self.suppress_id = spot
+        self.flash = max(self.flash, 0.28)
+        self.audio.play(sound)
+        if self.field is not None:
+            bay = self._spots().get(spot)
+            if bay is not None:
+                self._burst(bay.cx, bay.cy, color, 16, 0.2)
+
+    def _weld(self, name: str) -> None:
+        if name in self.welds:
+            return
+        self.welds.add(name)
+        self.weld_hot[name] = 1.0
+        self.suppress_id = f"weld-{name}"
+        self.audio.play("weld")
+        spot = self._spots().get(f"weld-{name}")
+        if spot is not None:
+            self._burst(spot.cx, spot.cy, (255, 176, 48), 22, 0.28)
+        if len(self.welds) == len(WELD_NAMES):
+            self._enter("body")
+
+    def _choose_kit(self, name: str) -> None:
+        if name not in KITS:
+            return
+        self.kit = name
+        self.hover_id = None
+        self.hover_t = 0.0
+        self.suppress_id = None
+        self.flash = 0.4
+        self.audio.play("stamp")
+
+    def _enter(self, stage: str) -> None:
+        self.stage = stage
+        self.held = None
+        self.carry = None
+        self.hover_id = None
+        self.hover_t = 0.0
+        self.grace = 0.0
+        self.suppress_id = None
+        self.flash = 0.55
+        if stage == "paint":
+            self.coat = "body"
+        if stage == "tires":
+            self.coat = "done"
+        self.audio.play("stamp")
+
+    def _build_targets(self, spots: dict[str, Spot]) -> dict[str, Spot]:
+        chosen: dict[str, Spot] = {}
+        if self.stage == "frame":
+            if self.held is None:
+                for part in FRAME_PARTS:
+                    if part not in self.fitted:
+                        chosen[f"frame-{part}"] = spots[f"frame-{part}"]
+            elif self.held in FRAME_PARTS:
+                chosen[f"frame-{self.held}"] = spots[f"frame-{self.held}"]
+                if self.held not in self.fitted and self._part_ready(self.held):
+                    chosen["bay"] = spots["bay"]
+        elif self.stage == "weld":
+            if self.held is None:
+                chosen["torch"] = spots["torch"]
+            elif self.held == "torch":
+                chosen["torch"] = spots["torch"]
+                for name in WELD_NAMES:
+                    if name not in self.welds:
+                        chosen[f"weld-{name}"] = spots[f"weld-{name}"]
+        elif self.stage == "body":
+            if self.kit is None:
+                for name in KITS:
+                    chosen[f"kit-{name}"] = spots[f"kit-{name}"]
+            elif self.held is None:
+                for part in PANEL_PARTS:
+                    if part not in self.panels:
+                        chosen[f"panel-{part}"] = spots[f"panel-{part}"]
+            elif self.held in PANEL_PARTS:
+                chosen[f"panel-{self.held}"] = spots[f"panel-{self.held}"]
+                chosen["bay"] = spots["bay"]
+        elif self.stage == "paint":
+            if self.coat == "decal":
+                for name in ("flames", "bolt", "plain"):
+                    chosen[f"decal-{name}"] = spots[f"decal-{name}"]
+            elif self.held in PAINTS:
+                chosen[f"color-{self.held}"] = spots[f"color-{self.held}"]
+                chosen["bay"] = spots["bay"]
+            else:
+                for name in PAINTS:
+                    chosen[f"color-{name}"] = spots[f"color-{name}"]
+        return chosen
+
+    def _build_suggested(self) -> set[str]:
+        if self.stage == "frame":
+            if self.held in FRAME_PARTS:
+                if self._part_ready(self.held):
+                    return {"bay"}
+                return {f"frame-{self.held}"}
+            if "rail" not in self.fitted:
+                return {"frame-rail"}
+            return {f"frame-{part}" for part in FRAME_PARTS if part not in self.fitted}
+        if self.stage == "weld":
+            if self.held != "torch":
+                return {"torch"}
+            return {f"weld-{name}" for name in WELD_NAMES if name not in self.welds}
+        if self.stage == "body":
+            if self.kit is None:
+                return {f"kit-{name}" for name in KITS}
+            if self.held in PANEL_PARTS:
+                return {"bay"}
+            return {f"panel-{part}" for part in PANEL_PARTS if part not in self.panels}
+        if self.coat == "decal":
+            return {"decal-flames", "decal-bolt", "decal-plain"}
+        if self.held in PAINTS:
+            return {"bay"}
+        return {f"color-{name}" for name in PAINTS}
+
+    def _cool(self, dt: float) -> None:
+        self.flash = max(0.0, self.flash - dt)
+        for name in list(self.weld_hot):
+            self.weld_hot[name] = max(0.0, self.weld_hot[name] - dt * 0.45)
+
+    def _ambience(self) -> None:
+        if self.phase != "repair" or self.hover_t <= 0.0 or self.hover_id is None:
+            return
+        spots = self._spots()
+        spot = spots.get(self.hover_id)
+        if spot is None:
+            return
+        if self.held == "torch" and self.hover_id.startswith("weld-"):
+            self._burst(spot.cx, spot.cy, (255, 186, 64), 3, 0.16)
+        elif self.held in PAINTS and self.hover_id == "bay":
+            self._burst(spot.cx, spot.cy, PAINTS[self.held], 3, 0.08)
+
+    def _burst(
+        self,
+        px: float,
+        py: float,
+        color: tuple[int, int, int],
+        count: int,
+        speed: float,
+    ) -> None:
+        if self.field is None:
+            return
+        x, y, width, height = self.field
+        nx = (px - x) / max(1, width)
+        ny = (py - y) / max(1, height)
+        for _ in range(count):
+            angle = self.rng.random() * math.tau
+            fast = speed * (0.35 + self.rng.random())
+            life = 0.22 + self.rng.random() * 0.28
+            self.sparks.append(
+                _Spark(
+                    nx,
+                    ny,
+                    math.cos(angle) * fast,
+                    math.sin(angle) * fast - 0.08,
+                    life,
+                    life,
+                    color,
+                    0.008 + self.rng.random() * 0.012,
+                )
+            )
+        if len(self.sparks) > 100:
+            self.sparks = self.sparks[-100:]
+
+    def _tick_sparks(self, dt: float) -> None:
+        alive: list[_Spark] = []
+        for spark in self.sparks:
+            spark.life -= dt
+            if spark.life <= 0.0:
+                continue
+            spark.vy += 0.55 * dt
+            spark.nx += spark.vx * dt
+            spark.ny += spark.vy * dt
+            alive.append(spark)
+        self.sparks = alive
+
+    def _art_state(self) -> dict[str, object]:
+        kit = self.kit
+        panels = set(self.panels)
+        body = self.body_color
+        accent = self.accent_color
+        decal = self.decal
+        if self.stage == "body" and self.kit is None and self.hover_id and self.hover_id.startswith("kit-"):
+            kit = self.hover_id.split("-", 1)[1]
+            panels = set(PANEL_PARTS)
+        elif self.stage == "paint" and self.coat == "decal" and self.hover_id and self.hover_id.startswith("decal-"):
+            decal = self.hover_id.split("-", 1)[1]
+        if self.held in PAINTS and self.coat == "body":
+            body = PAINTS[self.held]
+        elif self.held in PAINTS and self.coat == "accent":
+            accent = PAINTS[self.held]
+        return {
+            "fitted": self.fitted,
+            "welds": self.welds,
+            "panels": panels,
+            "kit": kit,
+            "body": body,
+            "accent": accent,
+            "decal": decal,
+            "hot": self.weld_hot,
+        }
 
     def _toggle(self, item: str, hand: _Hand | None, spot: str) -> None:
         if self.held is None:
@@ -663,14 +1050,19 @@ class GarageGame:
         _blit_cover(surface, "shop", pygame.Rect(x, y, width, height))
         spots = self._spots()
         suggested = self._suggested()
-        self._draw_station(surface, spots["pile"], "tire", self.held != "tire")
-        self._draw_station(surface, spots["bucket"], "bucket", True)
-        self._draw_station(surface, spots["wrench"], "wrench", self.held != "wrench")
+        if self.stage == "tires":
+            self._draw_station(surface, spots["pile"], "tire", self.held != "tire")
+            self._draw_station(surface, spots["bucket"], "bucket", True)
+            self._draw_station(surface, spots["wrench"], "wrench", self.held != "wrench")
+        else:
+            self._draw_build_stations(surface, spots)
         self._draw_truck(surface, truck_pixels(self.field), 0.0, 0.0, None, repair=True)
+        self._draw_sparks(surface)
         self._draw_marks(surface, spots, suggested)
         self._draw_carry(surface)
         self._draw_hands(surface)
-        self._draw_race(surface, spots["race"])
+        if self.stage == "tires":
+            self._draw_race(surface, spots["race"])
         self._draw_status(surface)
 
     def _draw_cutscene(self, surface: pygame.Surface) -> None:
@@ -699,6 +1091,140 @@ class GarageGame:
             spots = self._spots()
             self._draw_reset(surface, spots["reset"])
             self._draw_status(surface)
+
+    def _draw_build_stations(self, surface: pygame.Surface, spots: dict[str, Spot]) -> None:
+        if self.stage == "frame":
+            labels = {"rail": "RAIL", "towers": "AXLES", "cage": "CAGE", "bed": "BED"}
+            for part, label in labels.items():
+                if part in self.fitted:
+                    continue
+                self._draw_chip(
+                    surface,
+                    spots[f"frame-{part}"],
+                    label,
+                    part,
+                    (150, 158, 168),
+                    show=self.held != part,
+                )
+        elif self.stage == "weld":
+            self._draw_chip(
+                surface,
+                spots["torch"],
+                "TORCH",
+                "torch",
+                (210, 150, 36),
+                show=self.held != "torch",
+            )
+        elif self.stage == "body" and self.kit is None:
+            for name, title in (("classic", "CLASSIC"), ("wedge", "WEDGE"), ("tube", "TUBE")):
+                self._draw_kit_card(surface, spots[f"kit-{name}"], title, name)
+        elif self.stage == "body":
+            labels = {"nose": "NOSE", "cabin": "CAB", "tail": "BED"}
+            for part, label in labels.items():
+                if part in self.panels:
+                    continue
+                self._draw_chip(
+                    surface,
+                    spots[f"panel-{part}"],
+                    label,
+                    part,
+                    (176, 170, 160),
+                    show=self.held != part,
+                )
+        elif self.stage == "paint" and self.coat == "decal":
+            for name, title in (("flames", "FLAMES"), ("bolt", "BOLT"), ("plain", "PLAIN")):
+                self._draw_text_card(surface, spots[f"decal-{name}"], title)
+        elif self.stage == "paint":
+            for name, color in PAINTS.items():
+                self._draw_chip(surface, spots[f"color-{name}"], name.upper(), name, color)
+
+    def _draw_chip(
+        self,
+        surface: pygame.Surface,
+        spot: Spot,
+        label: str,
+        icon: str,
+        color: tuple[int, int, int],
+        show: bool = True,
+    ) -> None:
+        assert self.field is not None
+        height = self.field[3]
+        _disc(surface, spot.cx, spot.cy, spot.radius * 1.05, (10, 14, 22, 150))
+        if show:
+            draw_icon(surface, icon, spot.cx, spot.cy - spot.radius * 0.06, spot.radius * 1.35, self.time, color)
+        else:
+            pygame.draw.circle(
+                surface,
+                GOLD,
+                (int(spot.cx), int(spot.cy)),
+                max(8, int(spot.radius * 0.55)),
+                max(2, int(height / 280)),
+            )
+        scale = max(0.42, height / 1200.0)
+        _center_text(
+            surface,
+            label,
+            pygame.Rect(
+                int(spot.cx - spot.radius),
+                int(spot.cy + spot.radius * 0.58),
+                int(spot.radius * 2),
+                int(height * 0.04),
+            ),
+            PAPER,
+            scale,
+            INK,
+        )
+
+    def _draw_kit_card(self, surface: pygame.Surface, spot: Spot, title: str, kit: str) -> None:
+        assert spot.rect is not None and self.field is not None
+        rect = pygame.Rect(int(spot.rect[0]), int(spot.rect[1]), int(spot.rect[2]), int(spot.rect[3]))
+        _button(surface, rect, "", (28, 36, 48), GOLD, self._progress(spot.id))
+        preview_h = max(24, rect.h - 16)
+        preview_w = int(preview_h * TRUCK_ASPECT)
+        if preview_w > rect.w * 0.62:
+            preview_w = int(rect.w * 0.62)
+            preview_h = max(16, int(preview_w / TRUCK_ASPECT))
+        preview = (float(rect.x + 8), float(rect.y + (rect.h - preview_h) * 0.5), float(preview_w), float(preview_h))
+        draw_body(
+            surface,
+            preview,
+            0.0,
+            fitted=set(FRAME_PARTS),
+            welds=set(WELD_NAMES),
+            panels=set(PANEL_PARTS),
+            kit=kit,
+            body=PAINTS["red"],
+            accent=PAINTS["yellow"],
+            decal="bolt" if kit == "classic" else "flames",
+            hot={},
+        )
+        _center_text(
+            surface,
+            title,
+            pygame.Rect(rect.x + preview_w + 4, rect.y, rect.w - preview_w - 10, rect.h),
+            PAPER,
+            max(0.45, rect.h / 150.0),
+            (28, 36, 48),
+        )
+
+    def _draw_text_card(self, surface: pygame.Surface, spot: Spot, title: str) -> None:
+        assert spot.rect is not None
+        rect = pygame.Rect(int(spot.rect[0]), int(spot.rect[1]), int(spot.rect[2]), int(spot.rect[3]))
+        fill = (120, 42, 24) if title == "FLAMES" else (36, 48, 72) if title == "BOLT" else (48, 52, 60)
+        edge = (255, 186, 96) if title == "FLAMES" else (255, 220, 90) if title == "BOLT" else (200, 204, 210)
+        _button(surface, rect, title, fill, edge, self._progress(spot.id))
+
+    def _draw_sparks(self, surface: pygame.Surface) -> None:
+        if self.field is None:
+            return
+        x, y, width, height = self.field
+        for spark in self.sparks:
+            life = spark.life / spark.max_life if spark.max_life else 0.0
+            radius = max(2, int(spark.size * height * (0.45 + life)))
+            px = int(x + spark.nx * width)
+            py = int(y + spark.ny * height)
+            pygame.draw.circle(surface, spark.color, (px, py), radius)
+            pygame.draw.circle(surface, (255, 248, 230), (px, py), max(1, radius // 2))
 
     def _draw_station(
         self,
@@ -766,12 +1292,25 @@ class GarageGame:
         cx = left + tw * 0.5
         cy = top + th * 0.5
         _shadow(surface, cx, top + th * 0.94, tw * 0.42, th * 0.08)
-        # The wheel wells are painted solid, so the tires go on after the
-        # body or the arches hide them. The axle end is a disk facing the
-        # camera, under the tire when one is fitted.
-        _sprite_at(surface, "truck_body", cx, cy, tw, th, angle)
+        # The arches stay open. Tires are drawn after the body, and the
+        # axle end is a disk facing the camera under the tire.
+        state = self._art_state()
+        draw_body(
+            surface,
+            rect,
+            angle,
+            fitted=state["fitted"],  # type: ignore[arg-type]
+            welds=state["welds"],  # type: ignore[arg-type]
+            panels=state["panels"],  # type: ignore[arg-type]
+            kit=state["kit"],  # type: ignore[arg-type]
+            body=state["body"],  # type: ignore[arg-type]
+            accent=state["accent"],  # type: ignore[arg-type]
+            decal=state["decal"],  # type: ignore[arg-type]
+            hot=state["hot"],  # type: ignore[arg-type]
+        )
         for index in range(WHEEL_COUNT):
-            self._draw_axle_face(surface, rect, index, angle)
+            if "towers" in self.fitted:
+                self._draw_axle_face(surface, rect, index, angle)
             if detach == index or not self.wheels[index].mounted:
                 continue
             self._draw_wheel_on(surface, rect, index, angle, spin, repair)
@@ -881,6 +1420,10 @@ class GarageGame:
         _arc(surface, spot.cx, spot.cy, spot.radius * 1.08, progress, GOLD, max(4, int(spot.radius * 0.08)))
 
     def _pulse(self, surface: pygame.Surface, spot: Spot) -> None:
+        if spot.kind == "rect" and spot.rect is not None:
+            rect = pygame.Rect(int(spot.rect[0]), int(spot.rect[1]), int(spot.rect[2]), int(spot.rect[3]))
+            pygame.draw.rect(surface, GOLD, rect, width=max(3, rect.h // 28), border_radius=14)
+            return
         if spot.kind != "circle":
             return
         pulse = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(self.time * 5.0))
@@ -908,9 +1451,14 @@ class GarageGame:
         elif self.held == "nut":
             size = height * 0.11
             _sprite_at(surface, "lug", px, py, size, size * (914 / 761), 0.0)
-        else:
+        elif self.held == "wrench":
             size = height * 0.15
             _sprite_at(surface, "wrench", px, py, size * 0.9, size, 0.0)
+        elif self.held in PAINTS:
+            draw_icon(surface, self.held, px, py, height * 0.16, self.time, PAINTS[self.held])
+        elif self.held is not None:
+            tint = (176, 170, 160) if self.held in PANEL_PARTS else (150, 158, 168)
+            draw_icon(surface, self.held, px, py, height * 0.16, self.time, tint)
 
     def _draw_hands(self, surface: pygame.Surface) -> None:
         # A ring, not a picture of a hand. The real fingers stay visible
@@ -955,9 +1503,20 @@ class GarageGame:
         _panel(surface, rect, (*INK, 210))
         tires, placed, tight = self.counts()
         scale = max(0.5, height / 1000.0)
+        if self.stage == "frame":
+            left_label = f"FRAME {len(self.fitted)}/4"
+        elif self.stage == "weld":
+            left_label = f"WELD {len(self.welds)}/4"
+        elif self.stage == "body":
+            name = self.kit.upper() if self.kit else "BODY"
+            left_label = f"{name} {len(self.panels)}/3" if self.kit else "BODY"
+        elif self.stage == "paint":
+            left_label = "PAINT"
+        else:
+            left_label = f"TIRES {tires}/2    NUTS {placed}/6    TIGHT {tight}/6"
         _center_text(
             surface,
-            f"TIRES {tires}/2    NUTS {placed}/6    TIGHT {tight}/6",
+            left_label,
             pygame.Rect(rect.x + 12, rect.y + 4, int(rect.w * 0.46), rect.h // 2),
             GOLD,
             scale * 0.72,
